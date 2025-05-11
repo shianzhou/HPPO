@@ -23,7 +23,7 @@ path_list = {
     'photo_path': 'D:/my_project_1/python_scripts/photo',
      
     #DQN 
-    'model_path_catch_DQN': 'D:/my_project_1/python_scripts/DQN/checkpoint/catc*h',
+    'model_path_catch_DQN': 'D:/my_project_1/python_scripts/DQN/checkpoint/catch',
     'model_path_tai_DQN': 'D:/my_project_1/python_scripts/DQN/checkpoint/tai',
     'shu_ju_path_DQN':'D:/my_project_1/python_scripts/DQN/shu_ju.txt',
     'gps_path_DQN':'D:/my_project_1/python_scripts/DQN/gps.txt',
