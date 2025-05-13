@@ -231,7 +231,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
                     }
                     torch.save(checkpoint, save_path)
                 loss = ppo.learn()  # 学习
-                log_writer.add(loss=loss)
+                log_writer_catch.add(loss=loss)
                 if i % 100 == 0:  # 每100步保存一次模型
                     save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i  # 保存模型
                     checkpoint = {
