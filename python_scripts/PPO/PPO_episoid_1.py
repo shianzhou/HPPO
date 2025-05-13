@@ -124,8 +124,8 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
 
     tai_episoid = 1
     episode_num = episode_start  # 初始化回合计数器
-    rpm = ReplayMemory(100000)  # 创建经验回放缓存
-    rpm_2 = ReplayMemory_2(100000)
+    #rpm = ReplayMemory(100000)  # 创建经验回放缓存
+    #rpm_2 = ReplayMemory_2(100000)
     env = Environment()
 
     for i in range(episode_start, episode_start + 50000):  # 从episode_start开始，最多再训练50000个周期
@@ -205,29 +205,39 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             # 可以修改reward值让其训练速度加快
             if good == 1:  # 如果good为1
                 # 将当前状态、动作、奖励、下一个状态、是否完成、是否达到目标添加到经验回放缓存中
-                rpm.append((obs_img, robot_state, action, log_prob, reward, done, value))  
+                #rpm.append((obs_img, robot_state, action, log_prob, reward, done, value))
+                # 同时将数据存储到PPO对象内部
+                ppo.store_transition(
+                    state=[obs_img, robot_state, robot_state],  # 包含图像、机器人状态和图神经网络输入
+                    action=action,
+                    reward=reward,
+                    next_state=[next_obs_img, next_state, next_state],  # 包含下一个图像、下一个状态和图神经网络输入
+                    done=done,
+                    value=value,
+                    log_prob=log_prob
+                )
             robot_state = env.get_robot_state()  # 获取机器人状态
             obs_tensor = next_obs_tensor  # 更新图像张量
-            if len(rpm) < 5000:  # 如果经验回放缓存小于3000
+            if len(ppo.states) < 5000:  # 如果经验回放缓存小于3000
                 episode_num = 0  # 计数器为0
-            if len(rpm) > 5000 and done == 1:  # 只有在buffer中存满了数据才会学习
+            if len(ppo.states) > 5000 and done == 1:  # 只有在buffer中存满了数据才会学习
                 if goal == 1:  # 如果达到目标
                     print("goal = 1")
                     save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i  # 保存模型
                     checkpoint = {
                         'policy': ppo.policy.state_dict(),
                         'optimizer': ppo.optimizer.state_dict(),
-                        'episode': episode_num
+                        'episode': i
                     }
                     torch.save(checkpoint, save_path)
-                loss = ppo.learn(rpm)  # 学习
+                loss = ppo.learn()  # 学习
                 log_writer.add(loss=loss)
                 if i % 100 == 0:  # 每100步保存一次模型
                     save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i  # 保存模型
                     checkpoint = {
                         'policy': ppo.policy.state_dict(),
                         'optimizer': ppo.optimizer.state_dict(),
-                        'episode': episode_num
+                        'episode': i
                     }
                     torch.save(checkpoint, save_path)
                 print(loss)  # 打印损失值
@@ -256,7 +266,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             print("抓取成功，开始抬腿训练...")
             total_episode = i
             print("tai_episoid:", tai_episoid)
-            PPO_tai_episoid(ppo2=ppo2, existing_env=env, total_episode=total_episode, episode=tai_episoid, rpm_2=rpm_2, log_writer_tai=log_writer_tai, log_file_latest_tai=log_file_latest_tai)
+            PPO_tai_episoid(ppo2=ppo2, existing_env=env, total_episode=total_episode, episode=tai_episoid, log_writer_tai=log_writer_tai, log_file_latest_tai=log_file_latest_tai)
             tai_episoid += 1 
 
 

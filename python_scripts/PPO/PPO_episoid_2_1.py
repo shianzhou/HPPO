@@ -4,7 +4,7 @@ from python_scripts.Webots_interfaces import Environment
 from python_scripts.Project_config import path_list, BATCH_SIZE, LR, EPSILON, GAMMA, TARGET_REPLACE_ITER, MEMORY_CAPACITY, device, gps_goal, gps_goal1
 from python_scripts.PPO.PPO_PPOnet_2 import PPO2 
 
-def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, rpm_2=None, log_writer_tai=None, log_file_latest_tai=None):
+def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, log_writer_tai=None, log_file_latest_tai=None):
 
     if ppo2 is None:
         ppo2 = PPO2()
@@ -88,7 +88,17 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, rp
         
         # 存储经验
         if good == 1:
-            rpm_2.append((robot_state, action, reward, next_state, done))
+            #rpm_2.append((robot_state, action, reward, next_state, done))
+            # 将数据存储到PPO2对象内部
+            ppo2.store_transition(
+                state=robot_state,
+                action=action,
+                reward=reward,
+                next_state=next_state,
+                done=done,
+                value=value,  
+                log_prob=log_prob  
+            )
             
         # 更新状态
         robot_state = env.get_robot_state()
@@ -110,7 +120,7 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, rp
             torch.save(checkpoint, save_path)
         
         #学习过程
-        if len(rpm_2) > 2000 and done == 1:
+        if len(ppo2.states) > 2000 and done == 1:
             # 如果达到目标，保存模型
             if goal == 1:
                 save_path = path_list['model_path_tai_PPO'] + f"/ppo_model_tai_{total_episode}_{episode}.ckpt"
@@ -122,7 +132,7 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, rp
                 torch.save(checkpoint, save_path)
                 
                 # 学习
-                loss = ppo2.learn(rpm_2)
+                loss = ppo2.learn()
 
                 # 记录损失值
                 log_writer_tai.add(loss=loss)
