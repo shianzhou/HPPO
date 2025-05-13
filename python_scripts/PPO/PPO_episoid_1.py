@@ -16,6 +16,8 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
     # 初始化日志写入器
     log_writer_catch = Log_write()  # 创建抓取日志写入器
     log_writer_tai = Log_write()  # 创建抬腿日志写入器
+
+    tai_episoid = 1
     import os
     import glob
     import re
@@ -113,7 +115,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             latest_model = max(model_files_tai, key=extract_numbers)
             total_ep, ep = extract_numbers(latest_model)
             print(f"找到最新抬腿模型: {latest_model}，总周期: {total_ep}，抬腿周期: {ep}")
-            
+            tai_episoid = ep
             # 加载模型
             ppo2.policy = torch.load(latest_model)
             print("抬腿模型加载成功！")
@@ -122,7 +124,6 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
     else:
         print("未找到已保存的抬腿模型，从头开始训练")
 
-    tai_episoid = 1
     episode_num = episode_start  # 初始化回合计数器
     #rpm = ReplayMemory(100000)  # 创建经验回放缓存
     #rpm_2 = ReplayMemory_2(100000)
@@ -152,7 +153,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             # x_graph = torch.tensor(robot_state, dtype=torch.float32).to(device)
             # x_graph = torch.tensor(robot_state, dtype=torch.float32).unsqueeze(1).to(device)  # 添加维度
             # 输入次数、状态，选择动作
-            action , log_prob , value = ppo.choose_action(episode_num=episode_num, 
+            action , log_prob , value = ppo.choose_action(episode_num=i, 
                                   obs=obs,
                                   x_graph=robot_state)
             print(f'第{i}周期，第{steps}步，动作a: {action}')
@@ -217,10 +218,13 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
                     log_prob=log_prob
                 )
             robot_state = env.get_robot_state()  # 获取机器人状态
+
+
+
             obs_tensor = next_obs_tensor  # 更新图像张量
-            if len(ppo.states) < 5000:  # 如果经验回放缓存小于3000
-                episode_num = 0  # 计数器为0
-            if len(ppo.states) > 5000 and done == 1:  # 只有在buffer中存满了数据才会学习
+            #if temp < 5000:  # 如果经验回放缓存小于3000
+                #episode_num = 0  # 计数器为0
+            if i > 700 and done == 1:  # 只有在buffer中存满了数据才会学习
                 if goal == 1:  # 如果达到目标
                     print("goal = 1")
                     save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i  # 保存模型
@@ -232,7 +236,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
                     torch.save(checkpoint, save_path)
                 loss = ppo.learn()  # 学习
                 log_writer_catch.add(loss=loss)
-                if i % 100 == 0:  # 每100步保存一次模型
+                if i % 500 == 0:  # 每100步保存一次模型
                     save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i  # 保存模型
                     checkpoint = {
                         'policy': ppo.policy.state_dict(),

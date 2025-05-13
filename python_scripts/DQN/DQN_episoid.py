@@ -16,6 +16,8 @@ def DQN_episoid(model_path=None):
     # 初始化日志写入器
     log_writer_catch = Log_write()  # 创建抓取日志写入器
     log_writer_tai = Log_write()  # 创建抬腿日志写入器
+
+    tai_episoid = 1
     import os
     import glob
     import re
@@ -115,7 +117,7 @@ def DQN_episoid(model_path=None):
             latest_model = max(model_files_tai, key=extract_numbers)
             total_ep, ep = extract_numbers(latest_model)
             print(f"找到最新抬腿模型: {latest_model}，总周期: {total_ep}，抬腿周期: {ep}")
-            
+            tai_episoid = ep
             # 加载模型
             dqn2.eval_net = torch.load(latest_model)
             dqn2.target_net.load_state_dict(dqn2.eval_net.state_dict())
@@ -125,8 +127,7 @@ def DQN_episoid(model_path=None):
     else:
         print("未找到已保存的抬腿模型，从头开始训练")
 
-    tai_episoid = 1
-    episode_num = episode_start  # 初始化回合计数器
+    #episode_num = episode_start  # 初始化回合计数器
     rpm = ReplayMemory(100000)  # 创建经验回放缓存
     rpm_2 = ReplayMemory_2(100000)
     env = Environment()
@@ -155,7 +156,7 @@ def DQN_episoid(model_path=None):
             # x_graph = torch.tensor(robot_state, dtype=torch.float32).to(device)
             # x_graph = torch.tensor(robot_state, dtype=torch.float32).unsqueeze(1).to(device)  # 添加维度
             # 输入次数、状态，选择动作
-            a = dqn.choose_action(episode_num=episode_num, 
+            a = dqn.choose_action(episode_num=i, 
                                   obs=obs,
                                   x_graph=robot_state)
             print(f'第{i}周期，第{steps}步，动作a: {a}')
@@ -201,8 +202,8 @@ def DQN_episoid(model_path=None):
                 rpm.append((obs_img, robot_state, a, reward, next_obs_img, next_state, done))  
             robot_state = env.get_robot_state()  # 获取机器人状态
             obs_tensor = next_obs_tensor  # 更新图像张量
-            if len(rpm) < 5000:  # 如果经验回放缓存小于3000
-                episode_num = 0  # 计数器为0
+            #if len(rpm) < 5000:  # 如果经验回放缓存小于3000
+                #episode_num = 0  # 计数器为0
             if len(rpm) > 5000 and done == 1:  # 只有在buffer中存满了数据才会学习
                 if goal == 1:  # 如果达到目标
                     print("goal = 1")
@@ -230,7 +231,7 @@ def DQN_episoid(model_path=None):
                 env.wait(100)  # 等待100ms
                 imgs = []  # 初始化图像列表
                 steps = 0  # 初始化步数
-                episode_num = episode_num + 1  # 计数器加1
+                #episode_num = episode_num + 1  # 计数器加1
                 # obs, obs_tensor = env.get_img(steps, imgs)  # 获取初始图像和图像张量
                 # robot_state = env.get_robot_state()  # 获取机器人状态
                 #log_writer_catch.add(action_list=log_writer_catch.action_list)

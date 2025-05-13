@@ -108,17 +108,17 @@ def DQN_tai_episoid(dqn2=None, existing_env=None ,total_episoid=0, episode=0, rp
             print(f"保存模型到: {save_path}")
             torch.save(dqn2.eval_net, save_path)
         # 学习过程
-        if len(rpm_2) > 2000 and done == 1:
+        if len(rpm_2) > 1000 and done == 1:
             # 如果达到目标，保存模型
             if goal == 1:
                 save_path = path_list['model_path_tai_DQN'] + f"/dqn_model_tai_{total_episoid}_{episode}.ckpt"
                 torch.save(dqn2.eval_net, save_path)
                 
                 # 学习
-                loss = dqn2.learn(rpm_2)
+            loss = dqn2.learn(rpm_2)
                 
-                # 记录损失值
-                log_writer_tai.add(loss=loss)
+            # 记录损失值
+            log_writer_tai.add(loss=loss)
                 
             # 记录结果
             log_writer_tai.add(return_all=return_all)
