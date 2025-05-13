@@ -65,17 +65,27 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
     if model_path:  # 如果指定了模型路径
         try:
             # 从指定路径加载模型
-            ppo.policy = torch.load(model_path)
-            # 从文件名中提取周期数
-            episode_start = int(model_path.split('_')[-1].split('.')[0])
-            print(f"从指定模型加载: {model_path}，从周期 {episode_start} 继续训练")
-            print("模型加载成功！")
+            checkpoint = torch.load(model_path)
+            if isinstance(checkpoint, dict) and 'policy' in checkpoint:
+                # 如果是保存的字典格式 {'policy': state_dict, ...}
+                ppo.policy.load_state_dict(checkpoint['policy'])
+                # 如果需要加载优化器状态
+                if 'optimizer' in checkpoint and ppo.optimizer:
+                    ppo.optimizer.load_state_dict(checkpoint['optimizer'])
+                print("从指定模型加载: {model_path}，模型加载成功！")
+                episode_start = int(model_path.split('_')[-1].split('.')[0])
+                print(f"从指定模型加载: {model_path}，从周期 {episode_start} 继续训练")
+            else:
+                # 如果是直接保存的模型或状态字典
+                ppo.policy.load_state_dict(checkpoint)
+                print("从指定模型加载: {model_path}，模型加载成功！(旧格式)")
+                episode_start = 0
         except Exception as e:
             print(f"指定模型加载失败: {e}")
             episode_start = 0
     else:  # 如果没有指定模型路径，使用原来的自动查找逻辑
         # 获取所有模型文件
-        model_files = glob.glob(path_list['model_path_catch_PPO'] + '/dqn_model_*.ckpt')
+        model_files = glob.glob(path_list['model_path_catch_PPO'] + '/ppo_model_*.ckpt')
         if model_files:
             # 按文件名中的数字排序，获取最新的模型文件
             latest_model = max(model_files, key=lambda x: int(x.split('_')[-1].split('.')[0]))
@@ -84,8 +94,18 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             
             # 加载模型
             try:
-                ppo.policy = torch.load(latest_model)
-                print("抓取模型加载成功！")
+                checkpoint = torch.load(latest_model)
+                if isinstance(checkpoint, dict) and 'policy' in checkpoint:
+                    # 如果是保存的字典格式 {'policy': state_dict, ...}
+                    ppo.policy.load_state_dict(checkpoint['policy'])
+                    # 如果需要加载优化器状态
+                    if 'optimizer' in checkpoint and ppo.optimizer:
+                        ppo.optimizer.load_state_dict(checkpoint['optimizer'])
+                    print("抓取模型加载成功！")
+                else:
+                    # 如果是直接保存的模型或状态字典
+                    ppo.policy.load_state_dict(checkpoint)
+                    print("抓取模型加载成功！(旧格式)")
             except Exception as e:
                 print(f"抓取模型加载失败: {e}")
                 episode_start = 0
@@ -94,10 +114,10 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             episode_start = 0
     
     # 抬腿模型加载
-    model_files_tai = glob.glob(path_list['model_path_tai_PPO'] + '/dqn_model_tai_*.ckpt')
+    model_files_tai = glob.glob(path_list['model_path_tai_PPO'] + '/ppo_model_tai_*.ckpt')
     if model_files_tai:
         try:
-            # 按新的文件名格式排序：dqn_model_tai_{total_episoid}_{episode}.ckpt
+            # 按新的文件名格式排序：ppo_model_tai_{total_episoid}_{episode}.ckpt
             # 定义一个函数来提取total_episoid和episode
             def extract_numbers(filename):
                 # 从文件名中提取数字部分
@@ -116,13 +136,30 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             total_ep, ep = extract_numbers(latest_model)
             print(f"找到最新抬腿模型: {latest_model}，总周期: {total_ep}，抬腿周期: {ep}")
             tai_episoid = ep
+            print(f"抬腿模型从周期 {tai_episoid} 继续训练")
             # 加载模型
-            ppo2.policy = torch.load(latest_model)
-            print("抬腿模型加载成功！")
+            try:
+                checkpoint = torch.load(latest_model)
+                if isinstance(checkpoint, dict) and 'policy' in checkpoint:
+                    # 如果是保存的字典格式 {'policy': state_dict, ...}
+                    ppo2.policy.load_state_dict(checkpoint['policy'])
+                    # 如果需要加载优化器状态
+                    if 'optimizer' in checkpoint and ppo2.optimizer:
+                        ppo2.optimizer.load_state_dict(checkpoint['optimizer'])
+                    print("抬腿模型加载成功！")
+                else:
+                    # 如果是直接保存的模型或状态字典
+                    ppo2.policy.load_state_dict(checkpoint)
+                    print("抬腿模型加载成功！(旧格式)")
+            except Exception as e:
+                print(f"抬腿模型加载失败: {e}")
         except Exception as e:
             print(f"抬腿模型加载失败: {e}")
     else:
         print("未找到已保存的抬腿模型，从头开始训练")
+
+
+
 
     episode_num = episode_start  # 初始化回合计数器
     #rpm = ReplayMemory(100000)  # 创建经验回放缓存

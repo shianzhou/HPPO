@@ -122,14 +122,21 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, lo
         #学习过程
         if episode > 100 and done == 1:
             # 如果达到目标，保存模型
-            if goal == 1:
-                save_path = path_list['model_path_tai_PPO'] + f"/ppo_model_tai_{total_episode}_{episode}.ckpt"
-                checkpoint = {
+            save_path = path_list['model_path_tai_PPO'] + f"/ppo_model_tai_{total_episode}_{episode}.ckpt"
+            checkpoint = {
                     'policy': ppo2.policy.state_dict(),
                     'optimizer': ppo2.optimizer.state_dict(),
                     'episode': episode
                 }
             torch.save(checkpoint, save_path)
+            # if goal == 1:
+            #     save_path = path_list['model_path_tai_PPO'] + f"/ppo_model_tai_{total_episode}_{episode}.ckpt"
+            #     checkpoint = {
+            #         'policy': ppo2.policy.state_dict(),
+            #         'optimizer': ppo2.optimizer.state_dict(),
+            #         'episode': episode
+            #     }
+            #     torch.save(checkpoint, save_path)
                 
             # 学习
             loss = ppo2.learn()
