@@ -91,10 +91,10 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, lo
             #rpm_2.append((robot_state, action, reward, next_state, done))
             # 将数据存储到PPO2对象内部
             ppo2.store_transition(
-                state=[obs_img, robot_state, robot_state],  # 修改为包含三个元素的列表
+                state=[obs_img, ppo_state, robot_state],  # 修改为包含三个元素的列表
                 action=action,
                 reward=reward,
-                next_state=[next_obs_img, next_state, next_state],  # 修改为包含三个元素的列表
+                next_state=[next_obs_img, ppo_state, next_state],  # 修改为包含三个元素的列表
                 done=done,
                 value=value,
                 log_prob=log_prob
