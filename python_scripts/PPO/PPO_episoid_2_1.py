@@ -109,7 +109,7 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, lo
             done = 1
             
         # 定期保存模型
-        if episode % 50 == 0:
+        if episode % 50 == 0 and done == 1:
             save_path = path_list['model_path_tai_PPO'] + f"/ppo_model_tai_{total_episode}_{episode}.ckpt"
             print(f"保存模型到: {save_path}")
             checkpoint = {
@@ -122,13 +122,13 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, lo
         #学习过程
         if episode > 100 and done == 1:
             # 如果达到目标，保存模型
-            save_path = path_list['model_path_tai_PPO'] + f"/ppo_model_tai_{total_episode}_{episode}.ckpt"
-            checkpoint = {
-                    'policy': ppo2.policy.state_dict(),
-                    'optimizer': ppo2.optimizer.state_dict(),
-                    'episode': episode
-                }
-            torch.save(checkpoint, save_path)
+            # save_path = path_list['model_path_tai_PPO'] + f"/ppo_model_tai_{total_episode}_{episode}.ckpt"
+            # checkpoint = {
+            #         'policy': ppo2.policy.state_dict(),
+            #         'optimizer': ppo2.optimizer.state_dict(),
+            #         'episode': episode
+            #     }
+            # torch.save(checkpoint, save_path)
             # if goal == 1:
             #     save_path = path_list['model_path_tai_PPO'] + f"/ppo_model_tai_{total_episode}_{episode}.ckpt"
             #     checkpoint = {
@@ -150,6 +150,12 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, lo
             
             # 如果回合结束，重置环境
         print("done:", done)
+
+        # #测试代码
+        # if done == 1 :
+        #     temp_loss = ppo2.learn()
+        #     print("测试代码运行成功")
+
         if done == 1 or steps > 20:
             print("抬腿回合结束，重置环境...")
             env.darwin._set_left_leg_initpose()  # 重置环境

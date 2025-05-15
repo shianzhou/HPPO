@@ -114,6 +114,17 @@ class ActorCritic(nn.Module):
         # 确保状态数据维度正确
         if len(state.shape) == 1:
             state = state.unsqueeze(0)  # 添加批次维度
+        # 处理 state 的数据维度，确保其为 1 * 4
+        if state.shape[1] > 4:
+            state = state[:, :4]  # 取前四个数据
+        elif state.shape[1] < 4:
+            # 计算需要补零的数量
+            padding_size = 4 - state.shape[1]
+            # 在最后一个维度上补零
+            state = torch.nn.functional.pad(state, (0, padding_size), mode='constant', value=0)
+        # 确保最终维度为 1 * 4
+        assert state.shape == (1, 4), f"Unexpected state shape after processing: {state.shape}"
+
         state = self.fc2(state)
         state = self.fc3(state)
         min_val2 = torch.min(state)
@@ -269,6 +280,7 @@ class PPO2:
             all_values = []
             
             for i in range(len(batch_states)):
+                print(batch_states[i][1])
                 action_probs, value = self.policy(x=batch_states[i][0], 
                                                state=batch_states[i][1], 
                                                x_graph=self.states[i][2])
