@@ -18,6 +18,9 @@ def SAC_episoid(model_path=None):
     # 初始化日志写入器
     log_writer_catch = Log_write()  # 创建抓取日志写入器
     log_writer_tai = Log_write()  # 创建抬腿日志写入器
+
+    tai_episoid = 1
+
     import os
     import glob
     import re
@@ -125,7 +128,7 @@ def SAC_episoid(model_path=None):
             latest_model = max(model_files_tai, key=extract_numbers)
             total_ep, ep = extract_numbers(latest_model)
             print(f"找到最新抬腿模型: {latest_model}，总周期: {total_ep}，抬腿周期: {ep}")
-            
+            tai_episoid = ep 
             checkpoint = torch.load(latest_model)
             sac2.policy_net.load_state_dict(checkpoint['policy_net'])
             sac2.q_net.load_state_dict(checkpoint['q_net'])
@@ -138,7 +141,7 @@ def SAC_episoid(model_path=None):
     else:
         print("未找到已保存的抬腿模型，从头开始训练")
 
-    tai_episoid = 1
+    #tai_episoid = 1
     episode_num = episode_start  # 初始化回合计数器
     rpm = ReplayMemory(100000)  # 创建经验回放缓存
     rpm_2 = ReplayMemory_2(100000)
@@ -261,7 +264,7 @@ def SAC_episoid(model_path=None):
                 print(f"Q损失: {avg_q_loss}, 策略损失: {avg_policy_loss}, Alpha损失: {avg_alpha_loss}")
                 
                 # 每500步保存一次模型
-                if i % 500 == 0:
+                if i % 3000 == 0:
                     path = path_list['model_path_catch_SAC'] + '/sac_model_%s.ckpt' % i
                     checkpoint = {
                         'policy_net': sac.policy_net.state_dict(),

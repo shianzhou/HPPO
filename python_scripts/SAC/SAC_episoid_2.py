@@ -3,6 +3,7 @@ import numpy as np
 import os
 import glob
 import math
+from python_scripts.Webots_interfaces import Environment
 from python_scripts.Project_config import path_list, gps_goal, gps_goal1, device
 from python_scripts.SAC.SAC_SACnet_2 import SAC2
 from python_scripts.DQN_Log_write import Log_write
@@ -48,7 +49,7 @@ def SAC_tai_episoid(sac2=None, existing_env=None, total_episoid=0, episode=0, rp
     print("____________________")
     
     # 抬腿训练循环
-    log_writer_tai.add(episode_num=episode)
+    log_writer_tai.add(episode_num=total_episoid)
 
     while True:
         obs_img, obs_tensor = env.get_img(steps, imgs)
@@ -104,7 +105,7 @@ def SAC_tai_episoid(sac2=None, existing_env=None, total_episoid=0, episode=0, rp
             done = 1
             
         # 定期保存模型
-        if episode % 50 == 0:
+        if episode % 500 == 0:
             save_path = path_list['model_path_tai_SAC'] + f"/sac_model_tai_{total_episoid}_{episode}.ckpt"
             print(f"保存模型到: {save_path}")
             checkpoint = {
@@ -117,21 +118,21 @@ def SAC_tai_episoid(sac2=None, existing_env=None, total_episoid=0, episode=0, rp
         # 学习过程
         if len(rpm_2) > 2000 and done == 1:
             # 如果达到目标，保存模型
-            if goal == 1:
-                save_path = path_list['model_path_tai_SAC'] + f"/sac_model_tai_{total_episoid}_{episode}.ckpt"
-                checkpoint = {
-                    'policy_net': sac2.policy_net.state_dict(),
-                    'q_net': sac2.q_net.state_dict(),
-                    'target_q_net': sac2.target_q_net.state_dict(),
-                    'log_alpha': sac2.log_alpha
-                }
-                torch.save(checkpoint, save_path)
+            # if goal == 1:
+            #     save_path = path_list['model_path_tai_SAC'] + f"/sac_model_tai_{total_episoid}_{episode}.ckpt"
+            #     checkpoint = {
+            #         'policy_net': sac2.policy_net.state_dict(),
+            #         'q_net': sac2.q_net.state_dict(),
+            #         'target_q_net': sac2.target_q_net.state_dict(),
+            #         'log_alpha': sac2.log_alpha
+            #     }
+            #     torch.save(checkpoint, save_path)
                 
-                # 学习
-                loss = sac2.learn(rpm_2)
+            # 学习
+            loss = sac2.learn(rpm_2)
                 
-                # 记录损失值
-                log_writer_tai.add(loss=loss)
+            # 记录损失值
+            log_writer_tai.add(loss=loss)
                 
             # 记录结果
             log_writer_tai.add(return_all=return_all)
