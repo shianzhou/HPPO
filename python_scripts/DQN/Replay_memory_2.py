@@ -42,20 +42,22 @@ class ReplayMemory_2:
         """
         # 对于抬腿训练，使用所有经验
         mini_batch = self.buffer
-        obs_batch, state_batch, action_batch, log_batch, reward_batch, done_batch = [], [], [], [], [], []
+        state_batch, action_batch, reward_batch, next_state_batch, done_batch = [], [], [], [], []
         
         for experience in mini_batch:
-            o, s, a, l, r, done = experience
-            obs_batch.append(o)
+            # 注意：这里只解包5个值，与DQN_episoid_2.py中存储的数据结构匹配
+            s, a, r, s_, done = experience
             state_batch.append(s)
             action_batch.append(a)
-            log_batch.append(l)
             reward_batch.append(r)
+            next_state_batch.append(s_)
             done_batch.append(done)
 
-        return np.array(obs_batch).astype('float32'), np.array(state_batch).astype('float32'), \
-            torch.tensor(action_batch).cpu().numpy().astype('float32'), torch.tensor(log_batch).cpu().numpy().astype('float32'), \
-            torch.tensor(reward_batch).cpu().numpy().astype('float32'), np.array(done_batch).astype('float32')
+        return np.array(state_batch).astype('float32'), \
+            np.array(action_batch).astype('float32'), \
+            np.array(reward_batch).astype('float32'), \
+            np.array(next_state_batch).astype('float32'), \
+            np.array(done_batch).astype('float32')
 
     def __len__(self):
         """获取经验池中样本数量"""

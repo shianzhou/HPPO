@@ -5,7 +5,7 @@ import torch_geometric
 from torch_geometric.data import Data
 from python_scripts.Project_config import device
 # 超参数
-BATCH_SIZE = 64                                 # 样本数量
+BATCH_SIZE = 32                                 # 样本数量
 LR = 0.0001                                       # 学习率
 EPSILON = 0.9                                   # greedy policy
 GAMMA = 0.99                                     # reward discount
@@ -172,7 +172,7 @@ class DQN_GNN(object):
         x_graph = b_s
         edge_index_graph = self.eval_net.create_edge_index()
         loss_all = 0  # 初始化损失值
-        for i in range(64):
+        for i in range(32):
             # 获得32个trasition的评估值和目标值，并利用损失函数和优化器进行评估网络参数更新
             state = [b_s[i][1], b_s[i][0], b_s[i][5], b_s[i][4]]
             #q_eval = self.eval_net(b_o[i], b_s[i])[int(b_a[i])]  # 因为已经确定在s时候所走的action，因此选定该action对应的Q值
@@ -185,7 +185,7 @@ class DQN_GNN(object):
             # 计算损失值
             loss = self.loss_func(q_eval, q_target)  # 计算损失值
             loss_all = loss_all + loss  # 累加损失值
-        loss_all = loss_all / 64  # 计算平均损失值
+        loss_all = loss_all / 32  # 计算平均损失值
         self.optimazer.zero_grad()  # 清空上一步的残余更新参数值
         loss_all.backward()  # 误差方向传播
         self.optimazer.step()  # 逐步的梯度优化

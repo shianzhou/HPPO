@@ -68,17 +68,17 @@ class DQN2(object):
             print("更新目标网络")
         self.learn_step_counter += 1
         
-        b_s, b_a, b_r, b_s_, done = rpm.sample(BATCH_SIZE)
+        b_s, b_a, b_r, b_s_, done = rpm.sample(32)
         loss_all = 0
         
-        for i in range(BATCH_SIZE):
+        for i in range(32):
             q_eval = self.eval_net(b_s[i])[int(b_a[i])]
             q_next = self.target_net(b_s_[i])
             q_target = b_r[i] + GAMMA * q_next.max(0)[0]
             loss = self.loss_func(q_eval, q_target)
             loss_all = loss_all + loss
             
-        loss_all = loss_all / BATCH_SIZE
+        loss_all = loss_all / 32
         self.optimazer.zero_grad()
         loss_all.backward()
         self.optimazer.step()
