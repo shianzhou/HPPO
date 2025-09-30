@@ -1,0 +1,55 @@
+{
+    "start time": "2025-09-02 17:52:39",
+    "save time": [
+        "2025-09-02 17:53:39"
+    ],
+    "episode_num": [0],
+    "shoulder_actions": [
+        []
+    ],
+    "arm_actions": [
+        []
+    ],
+    "log_prob_list": [
+        []
+    ],
+    "value_list": [
+        []
+    ],
+    "LegUpper_actions": [
+        [0.510322093963623]
+    ],
+    "LegLower_actions": [
+        [0.8678129315376282]
+    ],
+    "Ankle_actions": [
+        [-0.15297353267669678]
+    ],
+    "log_prob_list_LegUpper": [
+        [-1.04915]
+    ],
+    "log_prob_list_LegLower": [
+        [-1.295461]
+    ],
+    "log_prob_list_Ankle": [
+        [-0.930642]
+    ],
+    "value_list_LegUpper": [
+        [
+            5.7e-05
+        ]
+    ],
+    "value_list_LegLower": [
+        [
+            -6.4e-05
+        ]
+    ],
+    "value_list_Ankle": [
+        [
+            -6.3e-05
+        ]
+    ],
+    "loss": [0],
+    "return_all": [0],
+    "goal": [0]
+}

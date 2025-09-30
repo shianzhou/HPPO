@@ -42,35 +42,88 @@ class Log_write:
         self.data = {
             'start time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'save time': [],
-            'episode_num': [],
-            'action_list': [[]]  # 初始化动作列表，包含一个空列表用于第一个序列
+            'shoulder_actions': [[]],  # 存储肩膀动作
+            'arm_actions': [[]]        # 存储手臂动作
         }
         # 注意：不再有 self.action_list 实例变量
 
-    def add_action(self, action):
+    def add_action(self, a_shoulder, a_arm):
         """
-        将单个动作添加到当前活动的操作序列中。
-        动作会被添加到 self.data['action_list'] 的最后一个子列表中。
+        将肩膀和手臂动作分别添加到对应的列表中
         """
-        # 确保 action_list 存在且至少有一个子列表 (通常由 __init__ 保证)
-        if 'action_list' not in self.data or not self.data['action_list']:
-            self.data['action_list'] = [[]] # 安全措施，理论上不应触发
+        # 确保动作列表存在
+        if 'shoulder_actions' not in self.data or not self.data['shoulder_actions']:
+            self.data['shoulder_actions'] = [[]]
+        if 'arm_actions' not in self.data or not self.data['arm_actions']:
+            self.data['arm_actions'] = [[]]
 
         # 如果 action 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
-        action_item = action
-        if hasattr(action, 'item') and callable(action.item):
+        # 处理肩膀动作
+        shoulder_item = a_shoulder
+        if hasattr(a_shoulder, 'item') and callable(a_shoulder.item):
             try:
-                action_item = action.item()
+                shoulder_item = a_shoulder.item()
             except Exception as e:
-                print(f"Warning: Could not call .item() on action {action}: {e}")
-                # 保持 action 原样，或根据需要处理错误
+                print(f"Warning: Could not call .item() on shoulder action {a_shoulder}: {e}")
+                # 保持原样
+        
+        # 处理手臂动作
+        arm_item = a_arm
+        if hasattr(a_arm, 'item') and callable(a_arm.item):
+            try:
+                arm_item = a_arm.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on arm action {a_arm}: {e}")
+                # 保持原样
 
         # 检查转换后的类型是否为基本数字类型（int 或 float）
-        if not isinstance(action_item, (int, float)):
-            print(f"Warning: Adding non-standard action type '{type(action_item).__name__}' to action list. Value: {action_item}")
+        if not isinstance(shoulder_item, (int, float)):
+            print(f"Warning: Adding non-standard action type '{type(shoulder_item).__name__}' to action list. Value: {shoulder_item}")
+        if not isinstance(arm_item, (int, float)):
+            print(f"Warning: Adding non-standard action type '{type(arm_item).__name__}' to action list. Value: {arm_item}")
 
         # 将动作添加到最后一个（当前活动的）序列中
-        self.data['action_list'][-1].append(action_item)
+        self.data['shoulder_actions'][-1].append(shoulder_item)
+        self.data['arm_actions'][-1].append(arm_item)
+        
+    def add_leg_action(self, leg_upper_action, leg_lower_action, ankle_action):
+        """
+        将腿部动作（大腿、小腿、脚踝）添加到对应的列表中
+        
+        Args:
+            leg_upper_action: 大腿动作值
+            leg_lower_action: 小腿动作值
+            ankle_action: 脚踝动作值
+        """
+        # 确保动作列表存在
+        for action_name in ['leg_upper_actions', 'leg_lower_actions', 'ankle_actions']:
+            if action_name not in self.data:
+                self.data[action_name] = [[]]
+            elif not self.data[action_name]:
+                self.data[action_name] = [[]]
+        
+        # 处理每个动作
+        actions = {
+            'leg_upper_actions': leg_upper_action,
+            'leg_lower_actions': leg_lower_action,
+            'ankle_actions': ankle_action
+        }
+        
+        for action_key, action_value in actions.items():
+            # 如果 action 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
+            action_item = action_value
+            if hasattr(action_value, 'item') and callable(action_value.item):
+                try:
+                    action_item = action_value.item()
+                except Exception as e:
+                    print(f"Warning: Could not call .item() on {action_key} action {action_value}: {e}")
+                    
+            # 检查转换后的类型是否为基本数字类型（int 或 float）
+            if not isinstance(action_item, (int, float)):
+                print(f"Warning: Adding non-standard {action_key} type '{type(action_item).__name__}'. Value: {action_item}")
+                
+            # 将动作添加到对应的列表中
+            self.data[action_key][-1].append(float(action_item))
 
     def add(self, **kwargs):
         """
@@ -93,13 +146,13 @@ class Log_write:
         会在 self.data['action_list'] 中添加一个新的空列表。
         """
         # 只有当最后一个动作列表非空时，才添加新的空列表，
-        # 避免在连续调用 clear_action 时产生多个连续的空列表。
-        if 'action_list' in self.data and self.data['action_list']:
-            if self.data['action_list'][-1]: # 检查最后一个列表是否非空
-                self.data['action_list'].append([])
-        else:
-            # 如果 action_list 不存在或为空（理论上不应发生），则重置
-            self.data['action_list'] = [[]]
+        # 避免在连续调用 clear_action 时产生多个连续的空列表。  
+        for key in ['shoulder_actions', 'arm_actions']:
+            if key in self.data and self.data[key]:
+                if self.data[key][-1]:  # 检查最后一个列表是否非空
+                    self.data[key].append([])
+            else:
+                self.data[key] = [[]]
 
     def get(self, key):
         """获取指定键的所有历史记录值（一个列表）"""
@@ -120,16 +173,17 @@ class Log_write:
              # 可以选择是继续使用 self.data 还是中止保存
              data_to_save = self.data # 回退到使用原始数据（浅拷贝）
 
-        # 修改episode_num，只保留最大值
-        if 'episode_num' in data_to_save and data_to_save['episode_num']:
-            max_episode = max(data_to_save['episode_num'])
-            data_to_save['episode_num'] = [max_episode]
+        # 修改episode_num和success_catch，只保留最大值
+        for key in ['episode_num', 'success_catch']:
+            if key in data_to_save and data_to_save[key]:
+                max_value = max(data_to_save[key])
+                data_to_save[key] = [max_value]
 
         # 可选：移除 action_list 末尾的空列表
         # 这通常是期望的行为，因为它代表一个已结束但未记录任何动作的序列
-        if 'action_list' in data_to_save and data_to_save['action_list'] and not data_to_save['action_list'][-1]:
-             # print("Removing trailing empty action list before saving.")
-             data_to_save['action_list'] = data_to_save['action_list'][:-1]
+        for action_key in ['shoulder_actions', 'arm_actions']:
+            if action_key in data_to_save and data_to_save[action_key] and not data_to_save[action_key][-1]:
+                data_to_save[action_key] = data_to_save[action_key][:-1]
 
         # --- JSON 序列化 ---
         try:
@@ -214,9 +268,9 @@ class Log_write:
 
         # 可选：移除 action_list 末尾的空列表
         # 这通常是期望的行为，因为它代表一个已结束但未记录任何动作的序列
-        if 'action_list' in data_to_save and data_to_save['action_list'] and not data_to_save['action_list'][-1]:
-             # print("Removing trailing empty action list before saving.")
-             data_to_save['action_list'] = data_to_save['action_list'][:-1]
+        for action_key in ['shoulder_actions', 'arm_actions']:
+            if action_key in data_to_save and data_to_save[action_key] and not data_to_save[action_key][-1]:
+                data_to_save[action_key] = data_to_save[action_key][:-1]
 
         # --- JSON 序列化 ---
         try:

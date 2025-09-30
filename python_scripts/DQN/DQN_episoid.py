@@ -10,8 +10,12 @@ from python_scripts.Project_config import path_list, gps_goal, gps_goal1, device
 from python_scripts.DQN_Log_write import Log_write
 
 def DQN_episoid(model_path=None):
-    dqn = DQN_GNN(node_num=19, env_information=None)  # 创建DQN对象
-    dqn2 = DQN2()
+    dqn_shoulder = DQN_GNN(node_num=20, env_information=None)  # 创建DQN对象
+    dqn_arm     = DQN_GNN(node_num=20, env_information=None)  # 创建DQN对象
+    
+    dqn2_LegUpper = DQN2()
+    dqn2_LegLower = DQN2()
+    dqn2_Ankle = DQN2()
 
     # 初始化日志写入器
     log_writer_catch = Log_write()  # 创建抓取日志写入器
@@ -65,8 +69,16 @@ def DQN_episoid(model_path=None):
     if model_path:  # 如果指定了模型路径
         try:
             # 从指定路径加载模型
-            dqn.eval_net = torch.load(model_path)
-            dqn.target_net.load_state_dict(dqn.eval_net.state_dict())
+            # 加载肩膀模型
+            shoulder_model = torch.load(model_path)
+            dqn_shoulder.eval_net.load_state_dict(shoulder_model.state_dict())
+            dqn_shoulder.target_net.load_state_dict(shoulder_model.state_dict())
+            
+            # 加载手臂模型
+            arm_model = torch.load(model_path)
+            dqn_arm.eval_net.load_state_dict(arm_model.state_dict())
+            dqn_arm.target_net.load_state_dict(arm_model.state_dict())
+            
             # 从文件名中提取周期数
             episode_start = int(model_path.split('_')[-1].split('.')[0])
             print(f"从指定模型加载: {model_path}，从周期 {episode_start} 继续训练")
@@ -83,10 +95,16 @@ def DQN_episoid(model_path=None):
             episode_start = int(latest_model.split('_')[-1].split('.')[0])
             print(f"找到最新抓取模型: {latest_model}，从周期 {episode_start} 继续训练")
             
-            # 加载模型
+            # 加载肩膀模型
             try:
-                dqn.eval_net = torch.load(latest_model)
-                dqn.target_net.load_state_dict(dqn.eval_net.state_dict())
+                shoulder_model = torch.load(latest_model)
+                dqn_shoulder.eval_net.load_state_dict(shoulder_model.state_dict())
+                dqn_shoulder.target_net.load_state_dict(shoulder_model.state_dict())
+                
+                # 加载手臂模型
+                arm_model = torch.load(latest_model)
+                dqn_arm.eval_net.load_state_dict(arm_model.state_dict())
+                dqn_arm.target_net.load_state_dict(arm_model.state_dict())
                 print("抓取模型加载成功！")
             except Exception as e:
                 print(f"抓取模型加载失败: {e}")
@@ -119,8 +137,12 @@ def DQN_episoid(model_path=None):
             print(f"找到最新抬腿模型: {latest_model}，总周期: {total_ep}，抬腿周期: {ep}")
             tai_episoid = ep
             # 加载模型
-            dqn2.eval_net = torch.load(latest_model)
-            dqn2.target_net.load_state_dict(dqn2.eval_net.state_dict())
+            dqn2_LegUpper.eval_net = torch.load(latest_model)
+            dqn2_LegUpper.target_net.load_state_dict(dqn2_LegUpper.eval_net.state_dict())
+            dqn2_LegLower.eval_net = torch.load(latest_model)
+            dqn2_LegLower.target_net.load_state_dict(dqn2_LegLower.eval_net.state_dict())
+            dqn2_Ankle.eval_net = torch.load(latest_model)
+            dqn2_Ankle.target_net.load_state_dict(dqn2_Ankle.eval_net.state_dict())
             print("抬腿模型加载成功！")
         except Exception as e:
             print(f"抬腿模型加载失败: {e}")
@@ -128,12 +150,19 @@ def DQN_episoid(model_path=None):
         print("未找到已保存的抬腿模型，从头开始训练")
 
     #episode_num = episode_start  # 初始化回合计数器
-    rpm = ReplayMemory(100000)  # 创建经验回放缓存
-    rpm_2 = ReplayMemory_2(100000)
+    # 创建经验回放缓存
+    rpm_shoulder = ReplayMemory(100000)  # 肩膀舵机的经验回放
+    rpm_arm = ReplayMemory(100000)      # 手臂舵机的经验回放  
+    rpm_legUpper = ReplayMemory_2(100000)      # 抬腿舵机的经验回放
+    rpm_legLower = ReplayMemory_2(100000)      # 抬腿舵机的经验回放
+    rpm_Ankle = ReplayMemory_2(100000)      # 抬腿舵机的经验回放
     env = Environment()
+    success_catch = 0                  # 抓取成功次数
 
-    for i in range(episode_start, episode_start + 50000):  # 从episode_start开始，最多再训练50000个周期
+    for i in range(episode_start, episode_start + 10000):  # 从episode_start开始，最多再训练10000个周期
         log_writer_catch.add(episode_num=i)
+        log_writer_catch.add(success_catch=success_catch)
+       
         print(f"<<<<<<<<<第{i}周期") # 打印当前周期
         env.reset()
         env.wait(500)   # 等待500ms
@@ -156,16 +185,27 @@ def DQN_episoid(model_path=None):
             # x_graph = torch.tensor(robot_state, dtype=torch.float32).to(device)
             # x_graph = torch.tensor(robot_state, dtype=torch.float32).unsqueeze(1).to(device)  # 添加维度
             # 输入次数、状态，选择动作
-            a = dqn.choose_action(episode_num=i, 
+            action_shoulder = dqn_shoulder.choose_action(episode_num=i, 
                                   obs=obs,
                                   x_graph=robot_state)
-            print(f'第{i}周期，第{steps}步，动作a: {a}')
+            
+            action_arm = dqn_arm.choose_action(episode_num=i, 
+                                  obs=obs,
+                                  x_graph=robot_state)
+      
+            print(f'第{i}周期，第{steps}步，肩膀动作: {action_shoulder:.4f}, 手臂动作: {action_arm:.4f}')
             # env.wait(1000)
             # print('wait 1000ms')
-            if isinstance(a, int) == True:  # 检查动作是否为整数
-                pass
-            else:
-                a = a.cpu()  # 将动作转换为CPU张量
+
+            # 确保动作是标量并限制在 [-1, 1] 范围内
+            if torch.is_tensor(action_shoulder):
+                action_shoulder = action_shoulder.item()  # 转换为 Python 标量
+            action_shoulder = max(-1.0, min(1.0, action_shoulder))  # 限制在 [-1, 1] 范围内
+            
+            if torch.is_tensor(action_arm):
+                action_arm = action_arm.item()  # 转换为 Python 标量
+            action_arm = max(-1.0, min(1.0, action_arm))  # 限制在 [-1, 1] 范围内
+
             gps1, gps2, gps3, gps4, foot_gps1 = env.print_gps()  # 获取GPS位置
             if steps >= 19:  # 如果步数大于等于19
                 catch_flag = 1.0  # 抓取器状态为1.0
@@ -174,9 +214,9 @@ def DQN_episoid(model_path=None):
             img_name = "img" + str(steps) + ".png"  # 图像名称
             # print("action:", a)
             # 添加动作到日志
-            log_writer_catch.add_action(a)
+            log_writer_catch.add_action(action_shoulder, action_arm)
             # 执行一步动作
-            next_state, reward, done, good, goal, count = env.step(robot_state, a, steps, catch_flag, gps1, gps2, gps3, gps4, img_name)
+            next_state, reward, done, good, goal, count = env.step(robot_state, action_shoulder, action_arm, steps, catch_flag, gps1, gps2, gps3, gps4, img_name)
             print(f'catch_flag: {catch_flag}')
             print(f'done: {done}')
             
@@ -197,26 +237,41 @@ def DQN_episoid(model_path=None):
             next_obs = [next_obs_img, next_state]
             # print('获取下一个状态更新完毕')
             # 可以修改reward值让其训练速度加快
+            robot_state = env.get_robot_state()  # 获取机器人状态
             if good == 1:  # 如果good为1
                 # 将当前状态、动作、奖励、下一个状态、是否完成、是否达到目标添加到经验回放缓存中
-                rpm.append((obs_img, robot_state, a, reward, next_obs_img, next_state, done))  
-            robot_state = env.get_robot_state()  # 获取机器人状态
+                # 存储肩膀舵机经验
+                rpm_shoulder.append((obs_img, robot_state, action_shoulder, reward, next_obs_img, next_state, done))
+                # 存储手臂舵机经验
+                rpm_arm.append((obs_img, robot_state, action_arm, reward, next_obs_img, next_state, done))
+            
             obs_tensor = next_obs_tensor  # 更新图像张量
-            #if len(rpm) < 5000:  # 如果经验回放缓存小于3000
+            #if len(rpm) < 5000:  # 如果经验回放缓 存小于3000
                 #episode_num = 0  # 计数器为0
-            if len(rpm) > 5000 and done == 1:  # 只有在buffer中存满了数据才会学习
+            #if done == 1:  # 只有在buffer中存满了数据才会学习
+            if len(rpm_shoulder) > 100 and done == 1:  # 只有在buffer中存满了数据才会学习
+                loss_shoulder = None
+                loss_arm = None
+                loss_shoulder = dqn_shoulder.learn(rpm_shoulder)  # 学习
+                loss_arm = dqn_arm.learn(rpm_arm)      #学习          
+                print(f"Loss_shoulder: {loss_shoulder}, Loss_arm: {loss_arm}, return_all: {return_all}") 
+                loss = loss_shoulder + loss_arm
+                log_writer_catch.add(loss=loss)
+
                 if goal == 1:  # 如果达到目标
                     print("goal = 1")
                     save_path = path_list['model_path_catch_DQN'] + '/dqn_model_%s.ckpt' % i  # 保存模型
-                    torch.save(dqn.eval_net, save_path)
-                loss = dqn.learn(rpm)  # 学习
-                log_writer_catch.add(loss=loss)
+                    torch.save(dqn_shoulder.eval_net, save_path)        
+                    torch.save(dqn_arm.eval_net, save_path)
+                    
                 # 每500步保存一次模型
-                if i % 500 == 0:
+                if i % 500 == 0 and i != 0:
                     path = path_list['model_path_catch_DQN'] + '/dqn_model_%s.ckpt' % i
-                    torch.save(dqn.eval_net, path)
+                    torch.save(dqn_shoulder.eval_net, path)
+                    torch.save(dqn_arm.eval_net, path)
                     print(f"保存模型: {path}")
-                print(loss)  # 打印损失值
+                if loss_shoulder is  None or loss_arm is  None:
+                    print("在本步骤中未计算损失值")
                 # 写入总奖励
                 log_writer_catch.add(return_all=return_all)
                 # 写入目标
@@ -240,12 +295,17 @@ def DQN_episoid(model_path=None):
                 break
         
         if success_flag1 == 1:
+            success_catch += 1
+            print("success_catch:", success_catch)
             print("抓取成功，开始抬腿训练...")
             total_episoid = i
             print("tai_episoid:", tai_episoid)
-            DQN_tai_episoid(dqn2=dqn2, existing_env=env, total_episoid=total_episoid, episode=tai_episoid, rpm_2=rpm_2, log_writer_tai=log_writer_tai, log_file_latest_tai=log_file_latest_tai)
+            DQN_tai_episoid(dqn2_LegUpper=dqn2_LegUpper, dqn2_LegLower=dqn2_LegLower, dqn2_Ankle=dqn2_Ankle, existing_env=env, total_episoid=total_episoid, episode=tai_episoid, rpm_legUpper=rpm_legUpper, rpm_legLower=rpm_legLower, rpm_Ankle=rpm_Ankle, log_writer_tai=log_writer_tai, log_file_latest_tai=log_file_latest_tai)
             tai_episoid += 1
 
 
-    # 如果整个训练过程结束，返回抓取成功状态和环境实例
+    
+    
+   
+    # 如果整个训练过程结束，返回抓取成功状态和环境实例 
     return False, env

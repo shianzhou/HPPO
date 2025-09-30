@@ -3,11 +3,17 @@ import torch
 from python_scripts.Webots_interfaces import Environment
 from python_scripts.Project_config import path_list, BATCH_SIZE, LR, EPSILON, GAMMA, TARGET_REPLACE_ITER, MEMORY_CAPACITY, device, gps_goal, gps_goal1
 from python_scripts.PPO.PPO_PPOnet_2 import PPO2 
+from python_scripts.PPO.hppo import HPPO
+from python_scripts.PPO_Log_write import Log_write
 
-def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, log_writer_tai=None, log_file_latest_tai=None):
+def PPO_tai_episoid(ppo2_LegUpper=None, ppo2_LegLower=None, ppo2_Ankle=None, existing_env=None ,total_episode=0, episode=0, log_writer_tai=None, log_file_latest_tai=None):
 
-    if ppo2 is None:
-        ppo2 = PPO2()
+    if ppo2_LegUpper is None:
+        ppo2_LegUpper = PPO2()
+    if ppo2_LegLower is None:
+        ppo2_LegLower = PPO2()
+    if ppo2_Ankle is None:
+        ppo2_Ankle = PPO2()
     # 使用已有的环境实例或创建新的
     if existing_env is not None:
         env = existing_env
@@ -15,6 +21,8 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, lo
         env = Environment()
 
     print("开始抬腿！")
+    # HPPO 3维离散开关：LegUpper, LegLower, Ankle
+    hppo_switch_tai = HPPO(num_servos=3, node_num=19, env_information=None)
     env.darwin.tai_leg_L1()
     env.darwin.tai_leg_L2()
         
@@ -29,27 +37,52 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, lo
     catch_flag = 0
     # 获取观察和状态
     print("____________________")
+   
 
     # 记录回合数
     log_writer_tai.add(episode_num=total_episode)
-
+    
+    # 记录上一次实际发送到环境的动作（用于离散=0时保持不变）
+    prev_U = 0.0
+    prev_L = 0.0
+    prev_A = 0.0
     while True:
         obs_img, obs_tensor = env.get_img(steps, imgs)
         robot_state = env.get_robot_state()
         # 将机器人状态转换为PPO状态，与PPO_episoid_1.py保持一致
         ppo_state = [robot_state[1], robot_state[0], robot_state[5], robot_state[4]]
         # 选择动作
-        action, log_prob, value = ppo2.choose_action(episode_num=episode, 
-                                       obs=[obs_img, ppo_state],
+        action_LegUpper, log_prob_LegUpper, value_LegUpper = ppo2_LegUpper.choose_action(episode_num=episode, 
+                                       obs=[obs_img, robot_state],
                                        x_graph=robot_state)
-
+        action_LegLower, log_prob_LegLower, value_LegLower = ppo2_LegLower.choose_action(episode_num=episode, 
+                                       obs=[obs_img, robot_state],
+                                       x_graph=robot_state)
+        action_Ankle, log_prob_Ankle, value_Ankle = ppo2_Ankle.choose_action(episode_num=episode, 
+                                       obs=[obs_img, robot_state],
+                                       x_graph=robot_state)
+        # 离散开关
+        d_action, d_log_prob, d_value = hppo_switch_tai.choose_action(
+            episode_num=episode,
+            obs=[obs_img, robot_state],
+            x_graph=robot_state
+        )
+        dU, dL, dA = float(d_action[0]), float(d_action[1]), float(d_action[2])
+        cur_U = float(action_LegUpper)
+        cur_L = float(action_LegLower)
+        cur_A = float(action_Ankle)
+        # 若离散为0，则保持上一时刻指令
+        m_LegUpper = prev_U if int(dU) == 0 else cur_U
+        m_LegLower = prev_L if int(dL) == 0 else cur_L
+        m_Ankle = prev_A if int(dA) == 0 else cur_A
+        
         # 分别添加动作、对数概率和状态价值到日志
-        log_writer_tai.add_action(action)
-        log_writer_tai.add_log_prob(log_prob)
-        log_writer_tai.add_value(value)
+        log_writer_tai.add_action_tai(action_LegUpper, action_LegLower, action_Ankle)
+        log_writer_tai.add_log_prob_tai(log_prob_LegUpper, log_prob_LegLower, log_prob_Ankle)
+        log_writer_tai.add_value_tai(value_LegUpper, value_LegLower, value_Ankle)
 
         print("第", steps + 1, "步")
-        print(f"选择动作: {action}")
+        print(f"{float(action_LegUpper):.4f}×{int(dU)}, {float(action_LegLower):.4f}×{int(dL)}, {float(action_Ankle):.4f}×{int(dA)}")
 
         # 获取GPS数据
         gps_values = env.print_gps()
@@ -62,9 +95,13 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, lo
             
         # 执行动作
         next_state, reward, done, good, goal, count = env.step2(
-            robot_state, action, steps, catch_flag, 
+            robot_state, m_LegUpper, m_LegLower, m_Ankle, steps, catch_flag, 
             gps_values[4], gps_values[0], gps_values[1], gps_values[2], gps_values[3],
         )
+        # 更新上一时刻动作
+        prev_U = m_LegUpper
+        prev_L = m_LegLower
+        prev_A = m_Ankle
         
         # 计算奖励
         if count == 1:
@@ -90,14 +127,42 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, lo
         if good == 1:
             #rpm_2.append((robot_state, action, reward, next_state, done))
             # 将数据存储到PPO2对象内部
-            ppo2.store_transition(
-                state=[obs_img, ppo_state, robot_state],  # 修改为包含三个元素的列表
-                action=action,
-                reward=reward,
-                next_state=[next_obs_img, ppo_state, next_state],  # 修改为包含三个元素的列表
+            ppo2_LegUpper.store_transition_tai(
+                state=[obs_img, robot_state, robot_state],
+                actions=action_LegUpper,
+                rewards=reward,
+                next_state=[next_obs_img, robot_state, next_state],
                 done=done,
-                value=value,
-                log_prob=log_prob
+                value=value_LegUpper,
+                log_prob=log_prob_LegUpper
+            )
+            ppo2_LegLower.store_transition_tai(
+                state=[obs_img, robot_state, robot_state],
+                actions=action_LegLower,
+                rewards=reward,
+                next_state=[next_obs_img, robot_state, next_state],
+                done=done,
+                value=value_LegLower,
+                log_prob=log_prob_LegLower
+            )
+            ppo2_Ankle.store_transition_tai(
+                state=[obs_img, robot_state, robot_state],
+                actions=action_Ankle,
+                rewards=reward,
+                next_state=[next_obs_img, robot_state, next_state],
+                done=done,
+                value=value_Ankle,
+                log_prob=log_prob_Ankle
+            )
+            # 存储离散HPPO
+            hppo_switch_tai.store_transition(
+                state=[obs_img, robot_state, robot_state],
+                action=d_action,
+                reward=reward,
+                next_state=[next_obs_img, robot_state, next_state],
+                done=done,
+                value=d_value,
+                log_prob=d_log_prob
             )
                         
         # 更新状态
@@ -109,18 +174,25 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, lo
             done = 1
             
         # 定期保存模型
-        if episode % 50 == 0 and done == 1:
+        if episode % 200 == 0 and done == 1:
             save_path = path_list['model_path_tai_PPO'] + f"/ppo_model_tai_{total_episode}_{episode}.ckpt"
             print(f"保存模型到: {save_path}")
             checkpoint = {
-                'policy': ppo2.policy.state_dict(),
-                'optimizer': ppo2.optimizer.state_dict(),
-                'episode': episode
+                "episode": episode,                      # 只写一次即可
+                # 上腿
+                "policy_LegUpper":    ppo2_LegUpper.policy.state_dict(),
+                "optimizer_LegUpper": ppo2_LegUpper.optimizer.state_dict(),
+                # 下腿
+                "policy_LegLower":    ppo2_LegLower.policy.state_dict(),
+                "optimizer_LegLower": ppo2_LegLower.optimizer.state_dict(),
+                # 踝关节
+                "policy_Ankle":       ppo2_Ankle.policy.state_dict(),
+                "optimizer_Ankle":    ppo2_Ankle.optimizer.state_dict(),
             }
             torch.save(checkpoint, save_path)
         
         #学习过程
-        if episode > 100 and done == 1:
+        if episode > 0 and done == 1:
             # 如果达到目标，保存模型
             # save_path = path_list['model_path_tai_PPO'] + f"/ppo_model_tai_{total_episode}_{episode}.ckpt"
             # checkpoint = {
@@ -139,10 +211,17 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, lo
             #     torch.save(checkpoint, save_path)
                 
             # 学习
-            loss = ppo2.learn()
-
-            # 记录损失值
-            log_writer_tai.add(loss=loss)
+            loss_LegUpper = ppo2_LegUpper.learn()
+            print("loss_LegUpper:", loss_LegUpper)
+            loss_LegLower = ppo2_LegLower.learn()
+            print("loss_LegLower:", loss_LegLower)
+            loss_Ankle = ppo2_Ankle.learn()
+            print("loss_Ankle:", loss_Ankle)
+            loss_hppo = hppo_switch_tai.learn()
+            loss = loss_LegUpper + loss_LegLower + loss_Ankle + loss_hppo
+            
+            # 分别记录三个智能体的loss值
+            log_writer_tai.add_loss_tai(loss_LegUpper, loss_LegLower, loss_Ankle, loss_hppo, loss)
                 
             # 记录结果
             log_writer_tai.add(return_all=return_all)
@@ -166,6 +245,7 @@ def PPO_tai_episoid(ppo2=None, existing_env=None ,total_episode=0, episode=0, lo
             #episode += 1
             obs, obs_tensor = env.get_img(steps, imgs)
             robot_state = env.get_robot_state()
-            log_writer_tai.clear()
+            
             log_writer_tai.save_tai(log_file_latest_tai)
             break
+        

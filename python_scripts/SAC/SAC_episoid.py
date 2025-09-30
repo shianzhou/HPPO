@@ -12,8 +12,11 @@ import numpy as np
 
 def SAC_episoid(model_path=None):
     # 创建SAC算法对象，将act_dim从2改为连续动作空间的维度
-    sac = SAC(act_dim=2, node_num=19)
-    sac2 = SAC2()
+    sac_shoulder = SAC(act_dim=1, node_num=19)
+    sac_arm = SAC(act_dim=1, node_num=19)
+    sac2_LegUpper = SAC2()
+    sac2_LegLower = SAC2()
+    sac2_Angkle = SAC2()
 
     # 初始化日志写入器
     log_writer_catch = Log_write()  # 创建抓取日志写入器
@@ -69,11 +72,16 @@ def SAC_episoid(model_path=None):
         try:
             # 从指定路径加载模型
             checkpoint = torch.load(model_path)
-            sac.policy_net.load_state_dict(checkpoint['policy_net'])
-            sac.q_net.load_state_dict(checkpoint['q_net'])
-            sac.target_q_net.load_state_dict(checkpoint['target_q_net'])
-            sac.log_alpha = checkpoint['log_alpha']
-            sac.alpha = torch.exp(sac.log_alpha)
+            sac_shoulder.policy_net.load_state_dict(checkpoint['policy_net'])
+            sac_shoulder.q_net.load_state_dict(checkpoint['q_net'])
+            sac_shoulder.target_q_net.load_state_dict(checkpoint['target_q_net'])
+            sac_shoulder.log_alpha = checkpoint['log_alpha']
+            sac_shoulder.alpha = torch.exp(sac_shoulder.log_alpha)
+            sac_arm.policy_net.load_state_dict(checkpoint['policy_net'])
+            sac_arm.q_net.load_state_dict(checkpoint['q_net'])
+            sac_arm.target_q_net.load_state_dict(checkpoint['target_q_net'])
+            sac_arm.log_alpha = checkpoint['log_alpha']
+            sac_arm.alpha = torch.exp(sac_arm.log_alpha)
             # 从文件名中提取周期数
             episode_start = int(model_path.split('_')[-1].split('.')[0])
             print(f"从指定模型加载: {model_path}，从周期 {episode_start} 继续训练")
@@ -93,11 +101,16 @@ def SAC_episoid(model_path=None):
             # 加载模型
             try:
                 checkpoint = torch.load(latest_model)
-                sac.policy_net.load_state_dict(checkpoint['policy_net'])
-                sac.q_net.load_state_dict(checkpoint['q_net'])
-                sac.target_q_net.load_state_dict(checkpoint['target_q_net'])
-                sac.log_alpha = checkpoint['log_alpha']
-                sac.alpha = torch.exp(sac.log_alpha)
+                sac_shoulder.policy_net.load_state_dict(checkpoint['policy_net'])
+                sac_shoulder.q_net.load_state_dict(checkpoint['q_net'])
+                sac_shoulder.target_q_net.load_state_dict(checkpoint['target_q_net'])
+                sac_shoulder.log_alpha = checkpoint['log_alpha']
+                sac_shoulder.alpha = torch.exp(sac_shoulder.log_alpha)
+                sac_arm.policy_net.load_state_dict(checkpoint['policy_net'])
+                sac_arm.q_net.load_state_dict(checkpoint['q_net'])
+                sac_arm.target_q_net.load_state_dict(checkpoint['target_q_net'])
+                sac_arm.log_alpha = checkpoint['log_alpha']
+                sac_arm.alpha = torch.exp(sac_arm.log_alpha)
                 print("抓取模型加载成功！")
             except Exception as e:
                 print(f"抓取模型加载失败: {e}")
@@ -130,11 +143,21 @@ def SAC_episoid(model_path=None):
             print(f"找到最新抬腿模型: {latest_model}，总周期: {total_ep}，抬腿周期: {ep}")
             tai_episoid = ep 
             checkpoint = torch.load(latest_model)
-            sac2.policy_net.load_state_dict(checkpoint['policy_net'])
-            sac2.q_net.load_state_dict(checkpoint['q_net'])
-            sac2.target_q_net.load_state_dict(checkpoint['target_q_net'])
-            sac2.log_alpha = checkpoint['log_alpha']
-            sac2.alpha = torch.exp(sac2.log_alpha)
+            sac2_LegUpper.policy_net.load_state_dict(checkpoint['policy_net'])
+            sac2_LegUpper.q_net.load_state_dict(checkpoint['q_net'])
+            sac2_LegUpper.target_q_net.load_state_dict(checkpoint['target_q_net'])
+            sac2_LegUpper.log_alpha = checkpoint['log_alpha']
+            sac2_LegUpper.alpha = torch.exp(sac2_LegUpper.log_alpha)
+            sac2_LegLower.policy_net.load_state_dict(checkpoint['policy_net'])
+            sac2_LegLower.q_net.load_state_dict(checkpoint['q_net'])
+            sac2_LegLower.target_q_net.load_state_dict(checkpoint['target_q_net'])
+            sac2_LegLower.log_alpha = checkpoint['log_alpha']
+            sac2_LegLower.alpha = torch.exp(sac2_LegLower.log_alpha)
+            sac2_Angkle.policy_net.load_state_dict(checkpoint['policy_net'])
+            sac2_Angkle.q_net.load_state_dict(checkpoint['q_net'])
+            sac2_Angkle.target_q_net.load_state_dict(checkpoint['target_q_net'])
+            sac2_Angkle.log_alpha = checkpoint['log_alpha']
+            sac2_Angkle.alpha = torch.exp(sac2_Angkle.log_alpha)
             print("抬腿模型加载成功！")
         except Exception as e:
             print(f"抬腿模型加载失败: {e}")
@@ -143,8 +166,11 @@ def SAC_episoid(model_path=None):
 
     #tai_episoid = 1
     episode_num = episode_start  # 初始化回合计数器
-    rpm = ReplayMemory(100000)  # 创建经验回放缓存
-    rpm_2 = ReplayMemory_2(100000)
+    rpm_shoulder = ReplayMemory(100000)  # 创建经验回放缓存
+    rpm_arm = ReplayMemory(100000)  # 创建经验回放缓存
+    rpm2_LegUpper = ReplayMemory_2(100000)
+    rpm2_LegLower = ReplayMemory_2(100000)
+    rpm2_Angkle = ReplayMemory_2(100000)
     env = Environment()
 
     # SAC算法的训练更新次数
@@ -187,6 +213,8 @@ def SAC_episoid(model_path=None):
             
             # env.wait(1000)
             # print('wait 1000ms')
+            
+
             
             gps1, gps2, gps3, gps4, foot_gps1 = env.print_gps()  # 获取GPS位置
             if steps >= 19:  # 如果步数大于等于19

@@ -11,7 +11,7 @@ class Net2(nn.Module):
         self.fc1 = nn.Linear(in_features=2000, out_features=2000)
         self.fc2 = nn.Linear(in_features=2000, out_features=act_dim)
 
-    def forward(self, x):
+    def  forward(self, x):
         x = torch.tensor(x).to(device)
         x = self.fc0(x)
         x = self.fc1(x)
@@ -22,7 +22,7 @@ class Net2(nn.Module):
 class DQN2(object):
     def __init__(self):
         # 创建评估网络和目标网络
-        self.eval_net, self.target_net = Net2(6).to(device), Net2(6).to(device)
+        self.eval_net, self.target_net = Net2(1).to(device), Net2(1).to(device)
         self.learn_step_counter = 0  # 学习步数记录
         self.memory_counter = 0      # 记忆量计数
         self.memory = np.zeros((MEMORY_CAPACITY, 6))  # 存储空间初始化
@@ -49,18 +49,16 @@ class DQN2(object):
         print(f"[抬腿] 当前探索率: {threshold}, 周期: {episode_num}")
             
         if np.random.uniform() < threshold:  # 选择最优动作
-            actions_value = self.eval_net.forward(robot_state)
+            action = self.eval_net.forward(robot_state)
             # 打印动作值以进行调试
-            print(f"[抬腿] 动作值: {actions_value.detach().cpu().numpy()}")
+            action = action.item()  # 如果action是单元素张量，转换为Python标量
+            print(f"[抬腿] 动作值: {action}")
+
             
-            new_actions_value = torch.unsqueeze(actions_value, dim=0)
-            action = torch.max(new_actions_value, dim=1)
-            action = action[1].item()  # 转换为Python数字
-            print(f"[抬腿] 选择最优动作: {action}")
-        else:  # 随机选择动作
-            action = np.random.randint(0, 4)  # 扩大动作空间到6个动作
-            print(f"[抬腿] 随机选择动作: {action}")
-        return action
+        else:
+            # 生成[-1,1]范围内的随机浮点数
+            action = np.random.uniform(-1.0, 1.0)
+        return action 
 
     def learn(self, rpm):
         if self.learn_step_counter % TARGET_REPLACE_ITER == 0:

@@ -255,19 +255,33 @@ def main(opt):
 class RobotRun(Darwin):
     # 控制机器人按照action行动的类
     # action:
-    def __init__(self, robot, state, action, step, catch_flag, gps1, gps2, gps3, gps4, img_name):
+    def __init__(self, robot, state, action_shouder, action_arm, step, catch_flag, gps1, gps2, gps3, gps4, img_name):
         super().__init__(robot)
         self.img_name = img_name    # 名称
         self.step = step    # 步数
         self.robot_state = state  # 机器人状态
         self.gps = [gps1, gps2, gps3, gps4]  # GPS坐标数值列表
-        self.action = action  # 动作
-        if action == 0:
-            self.ArmLower = 0  # 手臂下端
-            self.Shoulder = 0.1  # 肩部
-        else:
-            self.ArmLower = 0.1  # 手臂下端 
-            self.Shoulder = 0  # 肩部
+        self.action_shouder = action_shouder  # 动作
+        self.action_arm = action_arm  # 动作
+        
+        
+        #print(f"action_arm: {action_arm}, type: {type(action_arm)}")
+        #print(f"action_shouder: {action_shouder}, type: {type(action_shouder)}")
+        
+        # 计算左臂和左肩的目标位置
+        current_left_arm = self.robot_state[5]       # 左臂的当前状态在索引5
+        current_left_shoulder = self.robot_state[1]  # 左肩的当前状态在索引1
+        left_arm_target = 1.17 * action_arm - 0.01
+        left_shoulder_target = 0.2995 * action_shouder - 0.145
+
+        self.ArmLower = left_arm_target - current_left_arm  # 手臂
+        self.Shoulder = left_shoulder_target - current_left_shoulder  # 肩部
+
+        # print(f"self.ArmLower: {self.ArmLower}")
+        # print(f"self.Shoulder: {self.Shoulder}")
+        # print(f"Left Arm Target: {left_arm_target}")
+        # print(f"Left Shoulder Target: {left_shoulder_target}")
+
         self.catch_flag = catch_flag  # 抓取标识符
         self.catch_Success_flag = False  # 抓取成功标识符
         #self.small_goal = 0  # 小目标
@@ -283,14 +297,23 @@ class RobotRun(Darwin):
                            self.touch_sensors['leg_R2']]
         self.future_state = [i for i in self.robot_state]  # 未来状态
         # 下一个状态
-        self.next = [self.robot_state[1] - self.Shoulder, 
-                     self.robot_state[0] + self.Shoulder,
-                     self.robot_state[5] + self.ArmLower, 
-                     self.robot_state[4] - self.ArmLower]  
+        self.next = [self.robot_state[1] + self.Shoulder,  #左肩
+                     self.robot_state[0] - self.Shoulder,  #右肩
+                     self.robot_state[5] + self.ArmLower,  #左臂
+                     self.robot_state[4] - self.ArmLower]  #右臂
+        # print(f"左肩: {self.robot_state[1]}")
+        # print(f"右肩: {self.robot_state[0]}")
+        # print(f"左臂: {self.robot_state[5]}")
+        # print(f"右臂: {self.robot_state[4]}")
         self.future_state[1] = self.next[0]  # 未来状态[1] = 下一个状态[0]
         self.future_state[0] = self.next[1]  # 未来状态[0] = 下一个状态[1]
         self.future_state[5] = self.next[2]  # 未来状态[5] = 下一个状态[2]
         self.future_state[4] = self.next[3]  # 未来状态[4] = 下一个状态[3]
+        # print(f"左肩: {self.future_state[1]}")
+        # print(f"右肩: {self.future_state[0]}")
+        # print(f"左臂: {self.future_state[5]}")
+        # print(f"右臂: {self.future_state[4]}")
+    
         self.now_state = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # 当前状态
         self.next_state = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # 下一个状态
         self.touch_value = [0.0, 0.0]  # 压力传感器值
@@ -345,6 +368,7 @@ class RobotRun(Darwin):
                 self.return_flag_list.update({'reward':0, 'count':0, 'done':1, 'good':1})
                 # 返回下一个状态，奖励，完成，好，目标，计数
                 # print('角度1超出限制,catch_flag: 0,done:1--------->341')
+                print("设置done=1，原因：future_state超出限制")  
                 return self.next_state, \
                        self.return_flag_list['reward'], \
                        self.return_flag_list['done'], \
@@ -361,7 +385,7 @@ class RobotRun(Darwin):
         else:
             self.return_flag_list.update({'reward':0, 'count':0, 'done':1, 'good':0})
             # 返回下一个状态，奖励，完成，好，目标，计数
-            # print('存在标识符不为1,catch_flag: 0,done:1------------->358')
+            print('存在标识符不为1,catch_flag: 0,done:1------------->388')
             return self.next_state, \
                    self.return_flag_list['reward'], \
                    self.return_flag_list['done'], \
@@ -378,7 +402,7 @@ class RobotRun(Darwin):
             else:
                 self.return_flag_list.update({'reward':0, 'count':0, 'done':1, 'good':0})
                 # 返回下一个状态，奖励，完成，好，目标，计数
-                # print('加速度传感器值不在限制范围内,catch_flag: 0,done:1--------->375')
+                print('加速度传感器值不在限制范围内,catch_flag: 0,done:1--------->405')
                 return self.next_state, \
                        self.return_flag_list['reward'], \
                        self.return_flag_list['done'], \
@@ -386,20 +410,46 @@ class RobotRun(Darwin):
                        self.return_flag_list['goal'], \
                        self.return_flag_list['count']
         # 如果catch_flag为0，即还没有抓到
+        
         if self.catch_flag == 0.0:
             # 执行动作到下一状态
             self.motors[1].setPosition(self.next[0])  # 电机1设置位置
             self.motors[0].setPosition(self.next[1])  # 电机0设置位置
             self.motors[5].setPosition(self.next[2])  # 电机5设置位置
             self.motors[4].setPosition(self.next[3])  # 电机4设置位置
-            self.robot.step(32)  # 机器人步长
-            self.robot.step(32)  # 机器人步长
-            self.robot.step(32)  # 机器人步长
-            self.robot.step(32)  # 机器人步长
-            self.robot.step(32)  # 机器人步长
-            self.robot.step(32)  # 机器人步长
-            self.robot.step(32)  # 机器人步长
-            self.robot.step(32)  # 机器人步长
+            # 获取当前4个舵机的位置
+            current_positions = [
+                self.motors_sensors[0].getValue(),  # 右肩
+                self.motors_sensors[1].getValue(),  # 左肩
+                self.motors_sensors[4].getValue(),  # 右臂
+                self.motors_sensors[5].getValue()   # 左臂
+            ]
+
+            # 目标位置
+            target_positions = [
+                self.next[0],  # 右肩
+                self.next[1],  # 左肩
+                self.next[2],  # 右臂
+                self.next[3]   # 左臂
+            ]
+
+            # 计算每个舵机的角度差（取绝对值）
+            diffs = []  # 创建一个空列表来存储差值
+            # 遍历目标位置和当前位置的索引
+            for i in range(len(target_positions)):
+                # 计算每个位置的目标值和当前值的绝对差
+                difference = abs(target_positions[i] - current_positions[i])
+                # 将差值添加到列表中
+                diffs.append(difference)
+            # 获取最大角度差
+            max_diff = max(diffs) if diffs else 0  # 如果diffs为空，则返回0
+
+            # 计算步数：将最大差值除以0.1，向上取整，然后乘以8
+            step_count = math.ceil(max_diff / 0.1) * 16 if max_diff > 0 else 1
+
+            # 执行step
+            for _ in range(step_count):
+                self.robot.step(32)
             # self.robot.step(32)  # 机器人步长
             # self.robot.step(32)  # 机器人步长
             # self.robot.step(32)  # 机器人步长
@@ -408,7 +458,20 @@ class RobotRun(Darwin):
             # self.robot.step(32)  # 机器人步长
             # self.robot.step(32)  # 机器人步长
             # self.robot.step(32)  # 机器人步长
-            # print(f'catch_flag={self.catch_flag}, done=0---------->397')
+            # self.robot.step(32)  # 机器人步长
+            # self.robot.step(32)  # 机器人步长
+            # self.robot.step(32)  # 机器人步长
+            # self.robot.step(32)  # 机器人步长
+            # self.robot.step(32)  # 机器人步长
+            # self.robot.step(32)  # 机器人步长
+            # self.robot.step(32)  # 机器人步长
+            # self.robot.step(32)  # 机器人步长
+            # self.robot.step(32)  # 机器人步长
+            # self.robot.step(32)  # 机器人步长
+            # self.robot.step(32)  # 机器人步长
+            # self.robot.step(32)  # 机器人步长
+            # self.robot.step(32)  # 机器人步长
+            # print(f'catch_flag={self.catch_flag}, done=0---------->474')
             self.return_flag_list.update({'done':0, 'reward':reward1 + reward2, 'good':1})
             # 遍历压力传感器
             for m in range(6):
@@ -437,13 +500,13 @@ class RobotRun(Darwin):
                self.touch_sensors['grasp_R1_1'].getValue() == 1.0 or \
                self.touch_sensors['grasp_R1_2'].getValue() == 1.0:
                 # 打印压力传感器值
-                print("___________")
-                print(self.touch_sensors['grasp_L1'].getValue())
-                print(self.touch_sensors['grasp_L1_1'].getValue())
-                print(self.touch_sensors['grasp_L1_2'].getValue())
-                print(self.touch_sensors['grasp_R1'].getValue())
-                print(self.touch_sensors['grasp_R1_1'].getValue())
-                print(self.touch_sensors['grasp_R1_2'].getValue())
+                # print("___________")
+                # print(self.touch_sensors['grasp_L1'].getValue())
+                # print(self.touch_sensors['grasp_L1_1'].getValue())
+                # print(self.touch_sensors['grasp_L1_2'].getValue())
+                # print(self.touch_sensors['grasp_R1'].getValue())
+                # print(self.touch_sensors['grasp_R1_1'].getValue())
+                # print(self.touch_sensors['grasp_R1_2'].getValue())
 
                 timer = 0  # 计时器
                 self.motors[21].setPosition(-0.5)  # 电机21设置位置 
@@ -451,7 +514,8 @@ class RobotRun(Darwin):
                 while self.robot.step(32) != -1:
                     timer += 32  # 计时器增加32 
                     if timer >= 2000:
-                        print('----------------------------->434')
+                        print(timer)
+                        print('----------------------------->518')
                         break
                 # 遍历压力传感器    
                 for j in range(len(self.touch)):
@@ -463,6 +527,7 @@ class RobotRun(Darwin):
                 # 失败标识符=1且步长小于等于5
                 if faild == 1 and self.step <= 5:
                     self.return_flag_list.update({'reward':0, 'count':1, 'done':1, 'good':1})
+                    print("失败标识符=1且步长小于等于5")
                     # 写入数据
                     with open(path_list['shu_ju_path_DQN'], 'a') as file:
                         file.write('0')
@@ -471,6 +536,7 @@ class RobotRun(Darwin):
                 # 失败=1且步长大于5
                 elif faild == 1 and self.step > 5:
                     self.return_flag_list.update({'count':1, 'done':1, 'good':1})
+                    print("失败=1且步长大于5")
                 # 成功=1
                 elif sucess == 1:
                     # 奖励1+奖励2小于20
@@ -508,13 +574,13 @@ class RobotRun(Darwin):
                     # print(f'i={i}, cha_zhi={self.cha_zhi}, done={self.return_flag_list["done"]}')
                     # if -100 < self.cha_zhi < 100:  # 差值在-0.005到0.005之间
                     if -0.005 < self.cha_zhi < 0.005:  # 差值在-0.005到0.005之间
-                        # print(f'i={i}, cha_zhi={self.cha_zhi}, done={self.return_flag_list["done"]}')
-                        # print('----------------------------->484')
+                        # print(f'i1={i}, 当前值={self.next_state[i]:.4f}, 目标值={self.future_state[i]:.4f}, 差值={self.cha_zhi:.4f}, done={self.return_flag_list["done"]}')
+                        # print('----------------------------->577')
                         continue
                     else:
-                        # print(f'catch_flag={self.catch_flag}, done=1----------------->487')
+                        print(f'catch_flag={self.catch_flag}, done=1----------------->580')
                         self.return_flag_list.update({'count':1, 'done':1, 'good':1})
-                        # print(f'i={i}, cha_zhi={self.cha_zhi}, done={self.return_flag_list["done"]}')
+                        print(f'i2={i}, 当前值={self.next_state[i]:.4f}, 目标值={self.future_state[i]:.4f}, 差值={self.cha_zhi:.4f}, done={self.return_flag_list["done"]}')
                         break
                         # continue
         # 否则catch_flag为非0，即已经抓到了
@@ -536,9 +602,11 @@ class RobotRun(Darwin):
             # 失败=1且步长小于等于5
             if faild == 1 and self.step <= 5:
                 self.return_flag_list.update({'reward':0, 'count':1, 'done':1, 'good':1})
+                print("失败=1且步长小于等于5")
             # 失败=1且步长大于5
             elif faild == 1 and self.step > 5:
                 self.return_flag_list.update({'reward':0, 'count':1, 'done':1, 'good':1})
+                print("失败=1且步长大于5")
             # 成功=1
             elif sucess == 1:
                 # 奖励1+奖励2小于20

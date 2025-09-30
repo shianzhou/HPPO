@@ -2,6 +2,7 @@
 import torch
 from python_scripts.PPO.PPO_PPOnet_2 import PPO2
 from python_scripts.PPO.PPO_PPOnet import PPO
+from python_scripts.PPO.hppo import HPPO
 from python_scripts.PPO.Replay_memory import ReplayMemory
 from python_scripts.PPO.Replay_memory_2 import ReplayMemory_2
 from python_scripts.PPO.PPO_episoid_2_1 import PPO_tai_episoid
@@ -10,9 +11,16 @@ from python_scripts.Webots_interfaces import Environment
 from python_scripts.Project_config import path_list, gps_goal, gps_goal1, device
 from python_scripts.PPO_Log_write import Log_write
 
-def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
-    ppo = PPO(node_num=19, env_information=None)  # 创建PPO对象
-    ppo2 = PPO2(node_num=19, env_information=None)  # 创建PPO2对象
+def PPO_episoid_1(model_path=None, max_steps_per_episode=500):   
+    ppo_arm = PPO(node_num=19, env_information=None)  # 创建PPO对象
+    ppo_shoulder = PPO(node_num=19, env_information=None)  # 创建PPO对象
+
+    # 混合动作：两个离散开关（肩、臂是否运动）
+    hppo_switch_catch = HPPO(num_servos=2, node_num=19, env_information=None)
+
+    ppo2_LegUpper = PPO2(node_num=19, env_information=None)  # 创建PPO2对象
+    ppo2_LegLower = PPO2(node_num=19, env_information=None)  # 创建PPO2对象
+    ppo2_Ankle = PPO2(node_num=19, env_information=None)  # 创建PPO2对象
 
     # 初始化日志写入器
     log_writer_catch = Log_write()  # 创建抓取日志写入器
@@ -67,18 +75,22 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
         try:
             # 从指定路径加载模型
             checkpoint = torch.load(model_path)
-            if isinstance(checkpoint, dict) and 'policy' in checkpoint:
+            if isinstance(checkpoint, dict) and 'policy_shoulder' in checkpoint:
                 # 如果是保存的字典格式 {'policy': state_dict, ...}
-                ppo.policy.load_state_dict(checkpoint['policy'])
+                ppo_shoulder.policy.load_state_dict(checkpoint['policy_shoulder'])
+                ppo_arm.policy.load_state_dict(checkpoint['policy_arm'])
                 # 如果需要加载优化器状态
-                if 'optimizer' in checkpoint and ppo.optimizer:
-                    ppo.optimizer.load_state_dict(checkpoint['optimizer'])
-                print("从指定模型加载: {model_path}，模型加载成功！")
+                if 'optimizer_shoulder' in checkpoint and ppo_shoulder.optimizer:
+                    ppo_shoulder.optimizer.load_state_dict(checkpoint['optimizer_shoulder'])
+                if 'optimizer_arm' in checkpoint and ppo_arm.optimizer:
+                    ppo_arm.optimizer.load_state_dict(checkpoint['optimizer_arm'])
+                print(f"从指定模型加载: {model_path}，模型加载成功！")
                 episode_start = int(model_path.split('_')[-1].split('.')[0])
                 print(f"从指定模型加载: {model_path}，从周期 {episode_start} 继续训练")
             else:
                 # 如果是直接保存的模型或状态字典
-                ppo.policy.load_state_dict(checkpoint)
+                ppo_shoulder.policy.load_state_dict(checkpoint)
+                ppo_arm.policy.load_state_dict(checkpoint)
                 print("从指定模型加载: {model_path}，模型加载成功！(旧格式)")
                 episode_start = 0
         except Exception as e:
@@ -96,16 +108,20 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             # 加载模型
             try:
                 checkpoint = torch.load(latest_model)
-                if isinstance(checkpoint, dict) and 'policy' in checkpoint:
+                if isinstance(checkpoint, dict) and 'policy_shoulder' in checkpoint:
                     # 如果是保存的字典格式 {'policy': state_dict, ...}
-                    ppo.policy.load_state_dict(checkpoint['policy'])
+                    ppo_shoulder.policy.load_state_dict(checkpoint['policy_shoulder'])
+                    ppo_arm.policy.load_state_dict(checkpoint['policy_arm'])
                     # 如果需要加载优化器状态
-                    if 'optimizer' in checkpoint and ppo.optimizer:
-                        ppo.optimizer.load_state_dict(checkpoint['optimizer'])
+                    if 'optimizer_shoulder' in checkpoint and ppo_shoulder.optimizer:
+                        ppo_shoulder.optimizer.load_state_dict(checkpoint['optimizer_shoulder'])
+                    if 'optimizer_arm' in checkpoint and ppo_arm.optimizer:
+                        ppo_arm.optimizer.load_state_dict(checkpoint['optimizer_arm'])
                     print("抓取模型加载成功！")
                 else:
                     # 如果是直接保存的模型或状态字典
-                    ppo.policy.load_state_dict(checkpoint)
+                    ppo_shoulder.policy.load_state_dict(checkpoint)
+                    ppo_arm.policy.load_state_dict(checkpoint)
                     print("抓取模型加载成功！(旧格式)")
             except Exception as e:
                 print(f"抓取模型加载失败: {e}")
@@ -141,16 +157,25 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             # 加载模型
             try:
                 checkpoint = torch.load(latest_model)
-                if isinstance(checkpoint, dict) and 'policy' in checkpoint:
-                    # 如果是保存的字典格式 {'policy': state_dict, ...}
-                    ppo2.policy.load_state_dict(checkpoint['policy'])
+                # 判断是否为新版字典格式（包含各关节 policy 键）
+                if isinstance(checkpoint, dict) and 'policy_LegUpper' in checkpoint:
+                    # 如果是保存的字典格式 {'policy_LegUpper': state_dict, ...}
+                    ppo2_LegUpper.policy.load_state_dict(checkpoint['policy_LegUpper'])
+                    ppo2_LegLower.policy.load_state_dict(checkpoint['policy_LegLower'])
+                    ppo2_Ankle.policy.load_state_dict(checkpoint['policy_Ankle'])
                     # 如果需要加载优化器状态
-                    if 'optimizer' in checkpoint and ppo2.optimizer:
-                        ppo2.optimizer.load_state_dict(checkpoint['optimizer'])
+                    if 'optimizer_LegUpper' in checkpoint and ppo2_LegUpper.optimizer:
+                        ppo2_LegUpper.optimizer.load_state_dict(checkpoint['optimizer_LegUpper'])
+                    if 'optimizer_LegLower' in checkpoint and ppo2_LegLower.optimizer:
+                        ppo2_LegLower.optimizer.load_state_dict(checkpoint['optimizer_LegLower'])
+                    if 'optimizer_Ankle' in checkpoint and ppo2_Ankle.optimizer:
+                        ppo2_Ankle.optimizer.load_state_dict(checkpoint['optimizer_Ankle'])
                     print("抬腿模型加载成功！")
                 else:
                     # 如果是直接保存的模型或状态字典
-                    ppo2.policy.load_state_dict(checkpoint)
+                    ppo2_LegUpper.policy.load_state_dict(checkpoint)
+                    ppo2_LegLower.policy.load_state_dict(checkpoint)
+                    ppo2_Ankle.policy.load_state_dict(checkpoint)
                     print("抬腿模型加载成功！(旧格式)")
             except Exception as e:
                 print(f"抬腿模型加载失败: {e}")
@@ -166,8 +191,9 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
     #rpm = ReplayMemory(100000)  # 创建经验回放缓存
     #rpm_2 = ReplayMemory_2(100000)
     env = Environment()
+    success_catch = 0                  # 抓取成功次数
 
-    for i in range(episode_start, episode_start + 50000):  # 从episode_start开始，最多再训练50000个周期
+    for i in range(episode_start, episode_start + 1000):  # 从episode_start开始，最多再训练10000个周期
         log_writer_catch.add(episode_num=i)
         print(f"<<<<<<<<<第{i}周期") # 打印当前周期
         env.reset()
@@ -181,20 +207,42 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
         # print(f'robot_state: {robot_state}')
         # print(f'robot_state_len: {len(robot_state)}')
         print("____________________")  # 打印初始状态
+        # 记录上一次实际发送到环境的动作（用于离散=0时保持不变）
+        prev_shoulder_action = 0.0
+        prev_arm_action = 0.0
         while True:
             # print(f'第{episode_num}周期，第{steps}步')
             ppo_state = [robot_state[1], robot_state[0], robot_state[5], robot_state[4]]  # 将机器人状态转换为ppo状态
             # log_writer.add(ppo_state=ppo_state, steps=steps)
-            obs = [obs_img, ppo_state]
+            obs = (obs_tensor, robot_state)
             # log_writer.add(obs=obs, steps=steps)
             # 将机器人状态转换为张量
             # x_graph = torch.tensor(robot_state, dtype=torch.float32).to(device)
             # x_graph = torch.tensor(robot_state, dtype=torch.float32).unsqueeze(1).to(device)  # 添加维度
             # 输入次数、状态，选择动作
-            action , log_prob , value = ppo.choose_action(episode_num=i, 
+            action_shoulder , log_prob_shoulder , value_shoulder = ppo_shoulder.choose_action(episode_num=i, 
                                   obs=obs,
-                                  x_graph=robot_state)
-            print(f'第{i}周期，第{steps}步，动作a: {action}')
+                                  x_graph=robot_state,
+                                  action_type='shoulder')
+            action_arm , log_prob_arm , value_arm = ppo_arm.choose_action(episode_num=i, 
+                                  obs=obs,
+                                  x_graph=robot_state,
+                                  action_type='arm')
+            # 离散开关：d0->shoulder, d1->arm (0/1)
+            d_action, d_log_prob, d_value = hppo_switch_catch.choose_action(
+                episode_num=i,
+                obs=obs,
+                x_graph=robot_state
+            )
+            # 转为0/1掩码
+            d0 = float(d_action[0])
+            d1 = float(d_action[1])
+            cur_shoulder = float(action_shoulder.item())
+            cur_arm = float(action_arm.item())
+            # 若离散为0，则保持上一时刻指令
+            masked_shoulder = prev_shoulder_action if int(d0) == 0 else cur_shoulder
+            masked_arm = prev_arm_action if int(d1) == 0 else cur_arm
+            print(f'第{i}周期，第{steps}步, 离散数值：({int(d0)},{int(d1)}), 连续: ({action_shoulder.item():.4f},{action_arm.item():.4f}), 实际: ({masked_shoulder:.4f},{masked_arm:.4f})')
             
             # # 简化动作处理逻辑
             # if isinstance(a, tuple):
@@ -217,11 +265,25 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             img_name = "img" + str(steps) + ".png"  # 图像名称
             # print("action:", a)
             # 分别添加动作、对数概率和状态价值到日志
-            log_writer_catch.add_action(action)
-            log_writer_catch.add_log_prob(log_prob)
-            log_writer_catch.add_value(value)
+            log_writer_catch.add_action_catch(action_shoulder, action_arm) 
+            log_writer_catch.add_log_prob_catch(log_prob_shoulder, log_prob_arm)
+            log_writer_catch.add_value_catch(value_shoulder, value_arm)
             # 执行一步动作
-            next_state, reward, done, good, goal, count = env.step(robot_state, action, steps, catch_flag, gps1, gps2, gps3, gps4, img_name)
+            next_state, reward, done, good, goal, count = env.step(
+                robot_state,
+                masked_shoulder,
+                masked_arm,
+                steps,
+                catch_flag,
+                gps1,
+                gps2,
+                gps3,
+                gps4,
+                img_name
+            )
+            # 更新上一时刻动作
+            prev_shoulder_action = masked_shoulder
+            prev_arm_action = masked_arm
             print(f'catch_flag: {catch_flag}')
             print(f'done: {done}')
             
@@ -246,14 +308,39 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
                 # 将当前状态、动作、奖励、下一个状态、是否完成、是否达到目标添加到经验回放缓存中
                 #rpm.append((obs_img, robot_state, action, log_prob, reward, done, value))
                 # 同时将数据存储到PPO对象内部
-                ppo.store_transition(
+                ppo_shoulder.store_transition_catch(
                     state=[obs_img, robot_state, robot_state],  # 包含图像、机器人状态和图神经网络输入
-                    action=action,
+                    action_shoulder=action_shoulder,
+                    action_arm=action_arm,                 
                     reward=reward,
                     next_state=[next_obs_img, next_state, next_state],  # 包含下一个图像、下一个状态和图神经网络输入
                     done=done,
-                    value=value,
-                    log_prob=log_prob
+                    value_shoulder=value_shoulder,
+                    value_arm=value_arm,
+                    log_prob_shoulder=log_prob_shoulder,
+                    log_prob_arm=log_prob_arm
+                )
+                ppo_arm.store_transition_catch(
+                    state=[obs_img, robot_state, robot_state],
+                    action_shoulder=action_shoulder,
+                    action_arm=action_arm,
+                    reward=reward,
+                    next_state=[next_obs_img, next_state, next_state],
+                    done=done,
+                    value_shoulder=value_shoulder,
+                    value_arm=value_arm,
+                    log_prob_shoulder=log_prob_shoulder,
+                    log_prob_arm=log_prob_arm
+                )
+                # 存储离散HPPO轨迹
+                hppo_switch_catch.store_transition(
+                    state=[obs_img, robot_state, robot_state],
+                    action=d_action,
+                    reward=reward,
+                    next_state=[next_obs_img, next_state, next_state],
+                    done=done,
+                    value=d_value,
+                    log_prob=d_log_prob
                 )
             robot_state = env.get_robot_state()  # 获取机器人状态
 
@@ -262,27 +349,50 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             obs_tensor = next_obs_tensor  # 更新图像张量
             #if temp < 5000:  # 如果经验回放缓存小于3000
                 #episode_num = 0  # 计数器为0
-            if i > 700 and done == 1:  # 只有在buffer中存满了数据才会学习
+            if i >= 0 and done == 1:  # 只有在buffer中存满了数据才会学习
                 if goal == 1:  # 如果达到目标
                     print("goal = 1")
                     save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i  # 保存模型
                     checkpoint = {
-                        'policy': ppo.policy.state_dict(),
-                        'optimizer': ppo.optimizer.state_dict(),
+                        'policy_shoulder': ppo_shoulder.policy.state_dict(),
+                        'optimizer_shoulder': ppo_shoulder.optimizer.state_dict(),
+                        'policy_arm': ppo_arm.policy.state_dict(),
+                        'optimizer_arm': ppo_arm.optimizer.state_dict(),
                         'episode': i
                     }
                     torch.save(checkpoint, save_path)
-                loss = ppo.learn()  # 学习
-                log_writer_catch.add(loss=loss)
-                if i % 500 == 0:  # 每100步保存一次模型
+                print("11111111111111111111111111111111111111111-303")
+                loss_shoulder = ppo_shoulder.learn(action_type='shoulder')
+                print("22222222222222222222222222222222222222222-305")
+                loss_arm = ppo_arm.learn(action_type='arm')
+                # 学习离散HPPO
+                loss_hppo = hppo_switch_catch.learn()
+
+                loss = loss_shoulder + loss_arm + loss_hppo
+
+                print('loss_arm:', loss_arm)
+                print('loss_shoulder:', loss_shoulder)
+                print('loss_hppo:', loss_hppo)
+                print('loss:', loss)
+                
+                # 分别记录三个智能体的loss值
+                log_writer_catch.add_loss_catch(loss_shoulder, loss_arm, loss_hppo, loss)
+                # 立即落盘，避免仅在回合结束保存导致当轮loss缺失
+                try:
+                    log_writer_catch.save_catch(log_file_latest_catch)
+                except Exception as _e:
+                    print(f"保存抓取loss到日志失败: {_e}")
+               
+                if i % 500 == 0 and i != 0:  # 每100步保存一次模型
                     save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i  # 保存模型
                     checkpoint = {
-                        'policy': ppo.policy.state_dict(),
-                        'optimizer': ppo.optimizer.state_dict(),
+                        'policy_shoulder': ppo_shoulder.policy.state_dict(),
+                        'optimizer_shoulder': ppo_shoulder.optimizer.state_dict(),
+                        'policy_arm': ppo_arm.policy.state_dict(),
+                        'optimizer_arm': ppo_arm.optimizer.state_dict(),
                         'episode': i
                     }
                     torch.save(checkpoint, save_path)
-                print(loss)  # 打印损失值
 
                 log_writer_catch.add(return_all=return_all)
                 # 写入目标
@@ -305,12 +415,16 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
                 break
 
         if success_flag1 == 1:
+            success_catch += 1
+            log_writer_catch.add(success_catch=success_catch)
+            print("success_catch:", success_catch)
             print("抓取成功，开始抬腿训练...")
             total_episode = i
             print("tai_episoid:", tai_episoid)
-            PPO_tai_episoid(ppo2=ppo2, existing_env=env, total_episode=total_episode, episode=tai_episoid, log_writer_tai=log_writer_tai, log_file_latest_tai=log_file_latest_tai)
+            PPO_tai_episoid(ppo2_LegUpper=ppo2_LegUpper, ppo2_LegLower=ppo2_LegLower, ppo2_Ankle=ppo2_Ankle, existing_env=env, total_episode=total_episode, episode=tai_episoid, log_writer_tai=log_writer_tai, log_file_latest_tai=log_file_latest_tai)
             tai_episoid += 1 
 
-
+    
+    log_writer_catch.save_catch(log_file_latest_catch)  # 保存日志
     # 如果整个训练过程结束，返回抓取成功状态和环境实例
     return False, env

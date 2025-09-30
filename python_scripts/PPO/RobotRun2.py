@@ -25,14 +25,16 @@ class RobotRun2:
     
     该类负责执行机器人的动作，检测传感器状态，计算奖励，并判断是否完成当前回合
     """
-    def __init__(self, robot, state, action, step, zhua, gps0, gps1, gps2, gps3, gps4):
+    def __init__(self, robot, state, action_leg_upper, action_leg_lower, action_ankle, step, zhua, gps0, gps1, gps2, gps3, gps4):
         """
         初始化RobotRun2类
         
         参数：
             robot：Webots机器人对象
             state：当前机器人状态（关节角度）
-            action：要执行的动作编号
+            action_leg_upper：腿部上部舵机动作
+            action_leg_lower：腿部下部舵机动作
+            action_ankle：脚踝舵机动作
             step：当前步数
             zhua：抓取器状态
             gps0-gps4：GPS传感器数据
@@ -49,30 +51,15 @@ class RobotRun2:
         self.gps2 = gps2
         self.gps3 = gps3
         self.gps4 = gps4
-        self.action = action  # 当前动作
+        self.action_leg_upper = action_leg_upper  # 当前动作
+        self.action_leg_lower = action_leg_lower  # 当前动作
+        self.action_ankle = action_ankle  # 当前动作
         
-        # 根据动作编号设置不同的关节运动参数
-        if action == 0:
-            # 动作0：腿部上部向后移动，脚踝向后移动
-            self.LegUpper = -0.05
-            self.LegLower = 0
-            self.Ankle = -0.05
-        elif action == 1:
-            # 动作1：腿部上部向前移动，脚踝向前移动
-            self.LegUpper = 0.05
-            self.LegLower = 0
-            self.Ankle = 0.05
-        elif action == 2:
-            # 动作2：腿部下部向后移动，脚踝向后移动
-            self.LegUpper = 0
-            self.LegLower = -0.05
-            self.Ankle = -0.05
-        else:
-            # 动作3：腿部下部向前移动，脚踝向前移动
-            self.LegUpper = 0
-            self.LegLower = 0.05
-            self.Ankle = 0.05
-
+       
+        self.LegUpper = 1.09 * self.action_leg_upper + 0.59
+        self.LegLower = 1.14 * self.action_leg_lower - 1.11
+        self.Ankle = 1.305 * self.action_ankle - 0.085
+        
 
         self.if_jia = zhua  # 抓取器状态
         self.jie1_Success = False  # 第一阶段是否成功

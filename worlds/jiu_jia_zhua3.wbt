@@ -9,8 +9,8 @@ WorldInfo {
   coordinateSystem "NUE"
 }
 Viewpoint {
-  orientation 0.16006756864133895 -0.9822527384335987 -0.09776467311327934 4.9680833889069635
-  position 0.574004522058663 0.39215777742031666 0.22930824991854715
+  orientation -0.005579898581017116 -0.9995672837243889 0.028880963274667815 4.646728795305373
+  position 1.8312938336962836 0.2760273458456668 -0.11967924917854322
 }
 TexturedBackground {
 }
@@ -385,8 +385,8 @@ DEF back Solid {
   name "back"
 }
 DEF robotis_op2 Robot {
-  translation 0.05704733551004723 0.33232205216836824 -0.011013011637889966
-  rotation 0.999988742463169 0.0008658111691452699 0.004665331494032058 0.2964943092889919
+  translation -0.010113552524303902 0.33217408466219284 -0.012595408765525451
+  rotation 0.9983822948734073 -0.055414146108881235 0.01273050251687401 0.29866860676865997
   children [
     DEF BODY_SLOT Group {
     }
@@ -499,7 +499,7 @@ DEF robotis_op2 Robot {
     }
     DEF DNeck HingeJoint {
       jointParameters HingeJointParameters {
-        position 0.2000000091828023
+        position 0.20000001695610675
         axis 0 1 0
         anchor 0 0.051 0
         dampingConstant 0.002
@@ -520,7 +520,7 @@ DEF robotis_op2 Robot {
       ]
       endPoint Solid {
         translation 0 0.051 0
-        rotation 0 1 0 0.20000000918280247
+        rotation 0 1 0 0.2000000169561078
         children [
           DEF DNeckShape Shape {
             appearance DEF METAL_APPEARANCE PBRAppearance {
@@ -541,7 +541,7 @@ DEF robotis_op2 Robot {
           }
           DEF DHead HingeJoint {
             jointParameters HingeJointParameters {
-              position -6.550822142478336e-08
+              position -2.9653960192287387e-08
               axis -1 0 0
               dampingConstant 0.002
               staticFriction 0.025
@@ -560,7 +560,7 @@ DEF robotis_op2 Robot {
               }
             ]
             endPoint Solid {
-              rotation 1 0 0 0.7854000708843065
+              rotation 1 0 0 0.7854000350295821
               children [
                 DEF HEAD_SLOT Transform {
                   translation 0 0.022 -0.012
@@ -722,6 +722,8 @@ DEF robotis_op2 Robot {
                   7.8494368e-07 -7.645979e-08 1.2199205e-05
                 ]
               }
+              linearVelocity 6.332883627251515e-08 2.738747591647603e-07 -7.674720659141642e-07
+              angularVelocity -3.9598744409358355e-06 2.1771088554674588e-06 1.9032070581225125e-06
             }
           }
         ]
@@ -745,11 +747,13 @@ DEF robotis_op2 Robot {
             -5.7530255e-07 -2.4729049e-08 -1.9223094e-07
           ]
         }
+        linearVelocity 4.11892239791289e-08 1.6941465385209765e-07 -6.94245829601553e-07
+        angularVelocity -3.911434411056703e-06 2.1800482139397523e-06 1.8946655562308629e-06
       }
     }
     DEF DPelvYL HingeJoint {
       jointParameters HingeJointParameters {
-        position -1.040027852995819e-06
+        position -3.2453253941374717e-07
         axis 0 -1 0
         anchor 0.037 -0.1222 -0.005
         dampingConstant 0.002
@@ -769,8 +773,8 @@ DEF robotis_op2 Robot {
         }
       ]
       endPoint Solid {
-        translation 0.036999069826204586 -0.12219715273645171 -0.00500374976095837
-        rotation 0.983814697738165 0.17860981333231518 0.014393578281948387 4.986437090700923e-06
+        translation 0.03699906982889599 -0.12219715273645171 -0.005003749761626001
+        rotation 0.9992623674768488 0.03551025535445089 0.014619942175844416 4.867094269873323e-06
         children [
           DEF DPelvYLShape Shape {
             appearance USE METAL_APPEARANCE
@@ -788,7 +792,7 @@ DEF robotis_op2 Robot {
           }
           DEF DPelvL HingeJoint {
             jointParameters HingeJointParameters {
-              position -4.0464953094754643e-07
+              position -2.0083729132962923e-08
               axis 0 0 -1
               dampingConstant 0.002
               staticFriction 0.025
@@ -807,7 +811,7 @@ DEF robotis_op2 Robot {
               }
             ]
             endPoint Solid {
-              rotation 0 0 -1 0.006143990261784634
+              rotation 0 0 -0.9999999999999999 0.006144373019396044
               children [
                 DEF DPelvLShape Shape {
                   appearance DEF MOTOR_APPEARANCE PBRAppearance {
@@ -829,7 +833,7 @@ DEF robotis_op2 Robot {
                 }
                 DEF DLegUpperL HingeJoint {
                   jointParameters HingeJointParameters {
-                    position 0.49999898900163764
+                    position 0.5000001958615911
                     axis -1 0 0
                     dampingConstant 0.002
                     staticFriction 0.025
@@ -848,7 +852,7 @@ DEF robotis_op2 Robot {
                     }
                   ]
                   endPoint Solid {
-                    rotation -1 0 0 0.4999989890016373
+                    rotation -1 0 0 0.5000001958615908
                     children [
                       TouchSensor {
                         translation 0 -0.058 0.027
@@ -887,7 +891,7 @@ DEF robotis_op2 Robot {
                       }
                       DEF DLegLowerL HingeJoint {
                         jointParameters HingeJointParameters {
-                          position -0.1999999786113796
+                          position -0.20000055464219274
                           axis -1 0 0
                           anchor 0 -0.093 0
                           dampingConstant 0.002
@@ -908,7 +912,7 @@ DEF robotis_op2 Robot {
                         ]
                         endPoint Solid {
                           translation 0 -0.093 0
-                          rotation 1 0 0 0.19999997861137964
+                          rotation 1 0 0 0.20000055464219255
                           children [
                             TouchSensor {
                               translation 0 -0.02 0.0305
@@ -934,7 +938,7 @@ DEF robotis_op2 Robot {
                             }
                             DEF DAnkleL HingeJoint {
                               jointParameters HingeJointParameters {
-                                position 5.007769896969576e-07
+                                position -1.8849107596743847e-08
                                 anchor 0 -0.093 0
                                 dampingConstant 0.002
                                 staticFriction 0.025
@@ -954,7 +958,7 @@ DEF robotis_op2 Robot {
                               ]
                               endPoint Solid {
                                 translation 0 -0.093 0
-                                rotation 1 0 0 5.004660971089217e-07
+                                rotation 1 0 0 0
                                 children [
                                   DEF DAnkleLShape Shape {
                                     appearance USE MOTOR_APPEARANCE
@@ -972,7 +976,7 @@ DEF robotis_op2 Robot {
                                   }
                                   DEF DFootL HingeJoint {
                                     jointParameters HingeJointParameters {
-                                      position 2.188363027126022e-07
+                                      position 3.652313097579906e-07
                                       axis 0 0 1
                                       dampingConstant 0.002
                                       staticFriction 0.025
@@ -991,7 +995,7 @@ DEF robotis_op2 Robot {
                                       }
                                     ]
                                     endPoint Solid {
-                                      rotation 0 0 1 2.1900144899933154e-07
+                                      rotation 0 0 1 3.6500241499888623e-07
                                       children [
                                         TouchSensor {
                                           translation 0.01 -0.0335 0
@@ -1070,6 +1074,8 @@ DEF robotis_op2 Robot {
                                         damping Damping {
                                         }
                                       }
+                                      linearVelocity 1.4647222717781904e-08 6.624088037730564e-08 1.262773768210188e-08
+                                      angularVelocity 2.709202319975075e-06 4.0420391846976506e-07 -1.741403630838266e-06
                                     }
                                   }
                                 ]
@@ -1092,6 +1098,8 @@ DEF robotis_op2 Robot {
                                     -7.9781067e-07 -3.9322246e-07 7.0770117e-06
                                   ]
                                 }
+                                linearVelocity 6.656610672692836e-08 1.3523413714006502e-07 9.494383048458491e-08
+                                angularVelocity 2.7140139663146327e-06 4.1803083001186427e-07 -6.962215293269469e-07
                               }
                             }
                           ]
@@ -1127,6 +1135,8 @@ DEF robotis_op2 Robot {
                               -9.3567395e-07 -2.3992085e-07 -1.2858493e-05
                             ]
                           }
+                          linearVelocity 9.961642719498259e-08 7.876003717599767e-08 8.294689261589678e-08
+                          angularVelocity 1.4192220787202958e-06 4.329989720904987e-07 -7.156640867834952e-07
                         }
                       }
                     ]
@@ -1149,6 +1159,8 @@ DEF robotis_op2 Robot {
                         1.2119368e-06 -2.1223016e-07 -1.9474021e-06
                       ]
                     }
+                    linearVelocity 1.6001278495480312e-07 7.618423807298926e-08 5.142679181073511e-08
+                    angularVelocity -2.625109071526663e-06 4.6054927616575344e-07 -7.7618210870475e-07
                   }
                 }
               ]
@@ -1171,6 +1183,8 @@ DEF robotis_op2 Robot {
                   7.1127469e-07 8.1143913e-07 -7.1635476e-06
                 ]
               }
+              linearVelocity 1.8935605678581537e-07 -4.038300132488326e-08 -1.100598300110202e-07
+              angularVelocity -3.877522326948692e-06 4.753956581903273e-07 -7.942994645908414e-07
             }
           }
         ]
@@ -1194,11 +1208,13 @@ DEF robotis_op2 Robot {
             0 0 -7.3350016e-07
           ]
         }
+        linearVelocity 1.8856409758802915e-07 6.873049772360305e-08 -2.3878399785702356e-07
+        angularVelocity -3.903361004920755e-06 -1.2474992849119875e-07 1.1883308152253715e-06
       }
     }
     DEF DPelvYR HingeJoint {
       jointParameters HingeJointParameters {
-        position 4.635053898127553e-08
+        position 4.331676738344112e-07
         axis 0 -1 0
         anchor -0.037 -0.1222 -0.005
         dampingConstant 0.002
@@ -1219,7 +1235,7 @@ DEF robotis_op2 Robot {
       ]
       endPoint Solid {
         translation -0.037 -0.1222 -0.005
-        rotation 0 -0.9999999999999999 0 4.2146848510894035e-08
+        rotation 0 -1 0 4.3290373821061784e-07
         children [
           DEF DPelvYRShape Shape {
             appearance USE METAL_APPEARANCE
@@ -1237,7 +1253,7 @@ DEF robotis_op2 Robot {
           }
           DEF DPelvR HingeJoint {
             jointParameters HingeJointParameters {
-              position 3.99093116347697e-07
+              position 4.832632404691175e-07
               axis 0 0 -1
               dampingConstant 0.002
               staticFriction 0.025
@@ -1256,7 +1272,7 @@ DEF robotis_op2 Robot {
               }
             ]
             endPoint Solid {
-              rotation 0 0 -1 3.9872789860545616e-07
+              rotation 0 0 -1 4.833124500580697e-07
               children [
                 DEF DPelvRShape Shape {
                   appearance USE MOTOR_APPEARANCE
@@ -1274,7 +1290,7 @@ DEF robotis_op2 Robot {
                 }
                 DEF DLegUpperR HingeJoint {
                   jointParameters HingeJointParameters {
-                    position -0.5000000423817097
+                    position -0.49999985009429343
                     dampingConstant 0.002
                     staticFriction 0.025
                   }
@@ -1292,7 +1308,7 @@ DEF robotis_op2 Robot {
                     }
                   ]
                   endPoint Solid {
-                    rotation -1 0 0 0.5000000423817101
+                    rotation -1 0 0 0.49999985009429365
                     children [
                       TouchSensor {
                         translation 0 -0.058 0.027
@@ -1331,7 +1347,7 @@ DEF robotis_op2 Robot {
                       }
                       DEF DLegLowerR HingeJoint {
                         jointParameters HingeJointParameters {
-                          position 0.20000022954797983
+                          position 0.20000028553332505
                           anchor 0 -0.093 0
                           dampingConstant 0.002
                           staticFriction 0.025
@@ -1351,7 +1367,7 @@ DEF robotis_op2 Robot {
                         ]
                         endPoint Solid {
                           translation 0 -0.093 0
-                          rotation 1 0 0 0.20000022954798075
+                          rotation 1 0 0 0.20000028553332438
                           children [
                             TouchSensor {
                               translation 0 -0.02 0.0305
@@ -1377,7 +1393,7 @@ DEF robotis_op2 Robot {
                             }
                             DEF DAnkleR HingeJoint {
                               jointParameters HingeJointParameters {
-                                position -4.698700339354989e-07
+                                position -1.0442915144908642e-07
                                 axis -1 0 0
                                 anchor 0 -0.093 0
                                 dampingConstant 0.002
@@ -1398,7 +1414,7 @@ DEF robotis_op2 Robot {
                               ]
                               endPoint Solid {
                                 translation 0 -0.093 0
-                                rotation 1 0 0 4.70272715033875e-07
+                                rotation 1 0 0 1.032382731180714e-07
                                 children [
                                   DEF DAnkleRShape Shape {
                                     appearance USE MOTOR_APPEARANCE
@@ -1416,7 +1432,7 @@ DEF robotis_op2 Robot {
                                   }
                                   DEF DFootR HingeJoint {
                                     jointParameters HingeJointParameters {
-                                      position -5.179622632268222e-07
+                                      position -5.236744974893831e-07
                                       axis 0 0 1
                                       dampingConstant 0.002
                                       staticFriction 0.025
@@ -1435,7 +1451,7 @@ DEF robotis_op2 Robot {
                                       }
                                     ]
                                     endPoint Solid {
-                                      rotation 0 0 -1 5.179091452653055e-07
+                                      rotation 0 0 -1 5.238770196213423e-07
                                       children [
                                         TouchSensor {
                                           translation -0.035 -0.0335 0
@@ -1501,6 +1517,8 @@ DEF robotis_op2 Robot {
                                           -2.5330463e-06 -2.1869558e-07 9.7620541e-07
                                         ]
                                       }
+                                      linearVelocity 1.3568933233171757e-08 -6.699463340225525e-08 -3.777464284474381e-09
+                                      angularVelocity -1.7507545029648334e-06 -6.247522905143001e-07 -2.045896078476167e-06
                                     }
                                   }
                                 ]
@@ -1525,6 +1543,8 @@ DEF robotis_op2 Robot {
                                   damping Damping {
                                   }
                                 }
+                                linearVelocity 8.516566735204447e-08 -1.203344262980414e-07 -3.691165424858495e-08
+                                angularVelocity -1.7589604930343035e-06 -6.29415629214265e-07 -8.782030929273488e-07
                               }
                             }
                           ]
@@ -1560,6 +1580,8 @@ DEF robotis_op2 Robot {
                               9.3567395e-07 2.3992085e-07 -1.2858493e-05
                             ]
                           }
+                          linearVelocity 8.757986868135018e-08 -7.917306806753224e-08 -5.2694061683863245e-08
+                          angularVelocity -1.8027052337846095e-06 -6.452258076303605e-07 -8.85202648573899e-07
                         }
                       }
                     ]
@@ -1582,6 +1604,8 @@ DEF robotis_op2 Robot {
                         -1.2119368e-06 2.1223016e-07 -1.9474021e-06
                       ]
                     }
+                    linearVelocity 1.638058449715406e-07 -9.342111638946859e-08 -1.1856270859283267e-07
+                    angularVelocity 3.608105541856501e-08 -6.541040188516867e-07 -8.547390673722578e-07
                   }
                 }
               ]
@@ -1604,6 +1628,8 @@ DEF robotis_op2 Robot {
                   -7.1127469e-07 -8.1143913e-07 -7.1635476e-06
                 ]
               }
+              linearVelocity 2.2770286938306164e-07 -1.7842391959677612e-07 -5.548801759882898e-08
+              angularVelocity -3.84666397430605e-06 -6.704713501421514e-07 -9.211694189589925e-07
             }
           }
         ]
@@ -1627,11 +1653,13 @@ DEF robotis_op2 Robot {
             0 0 -7.3350016e-07
           ]
         }
+        linearVelocity 1.9406147503506678e-07 -7.533738323616776e-08 -1.236603337273579e-07
+        angularVelocity -3.882538355976874e-06 -1.225302664267129e-06 8.457414047089603e-07
       }
     }
     DEF DShoulderL HingeJoint {
       jointParameters HingeJointParameters {
-        position 0.41454034714990035
+        position -0.42331449353915185
         anchor 0.082 0 0
         dampingConstant 0.002
         staticFriction 0.025
@@ -1650,8 +1678,8 @@ DEF robotis_op2 Robot {
         }
       ]
       endPoint Solid {
-        translation 0.08199999387717538 -3.818486219017073e-06 1.9885546320264555e-06
-        rotation 0.9999999999999759 -1.5685377752939863e-07 -1.5347043913646367e-07 0.4146716551907954
+        translation 0.08199999387717538 -1.0768784196329252e-06 4.168395302596071e-06
+        rotation -0.9999999999999768 -2.0163677600346341e-07 -7.487821741249517e-08 0.42318318840686076
         children [
           DEF DShoulderLShape Shape {
             appearance USE METAL_APPEARANCE
@@ -1669,7 +1697,7 @@ DEF robotis_op2 Robot {
           }
           DEF DArmUpperL HingeJoint {
             jointParameters HingeJointParameters {
-              position 0.6700000165516994
+              position 0.669999863619391
               axis 0 0 -1
               anchor 0 -0.016 0
               dampingConstant 0.002
@@ -1690,7 +1718,7 @@ DEF robotis_op2 Robot {
             ]
             endPoint Solid {
               translation 0 -0.016 0
-              rotation 0 0 1 0.11517796475200366
+              rotation 0 0 1 0.11517811768201526
               children [
                 DEF DArmUpperLShape Group {
                   children [
@@ -1722,7 +1750,7 @@ DEF robotis_op2 Robot {
                 }
                 DEF DArmLowerL HingeJoint {
                   jointParameters HingeJointParameters {
-                    position -0.7145402324382815
+                    position 0.25000006294244903
                     anchor 0 -0.06 0.016
                     dampingConstant 0.002
                     staticFriction 0.025
@@ -1742,7 +1770,7 @@ DEF robotis_op2 Robot {
                   ]
                   endPoint Solid {
                     translation 0 -0.06 0.016
-                    rotation -1 -5.522903614583015e-26 1.7347234840406153e-18 2.2884813036583886
+                    rotation -1 -1.1916258530630936e-18 2.276268269293707e-18 1.3239410082774048
                     children [
                       TouchSensor {
                         translation 0 -0.073 -0.016
@@ -1812,7 +1840,7 @@ DEF robotis_op2 Robot {
                               }
                               HingeJoint {
                                 jointParameters HingeJointParameters {
-                                  position 0.9999981207998185
+                                  position 0.9999999991527411
                                   anchor 0 0.01 0
                                   dampingConstant 0.002
                                   staticFriction 0.025
@@ -1831,8 +1859,8 @@ DEF robotis_op2 Robot {
                                   }
                                 ]
                                 endPoint Solid {
-                                  translation 0.0004999999999772266 0.012675322541720352 0.012004594976413962
-                                  rotation 0.9999999999994199 -6.019450487167501e-07 8.932000873500363e-07 1.0934334949449234
+                                  translation 0.0004999999999770802 0.01267529999284961 0.012004600001592765
+                                  rotation 0.9999999999994199 -6.019449586551348e-07 8.93198143615265e-07 1.0934353732935953
                                   children [
                                     TouchSensor {
                                       translation 0.02 0.01 -0.008
@@ -1924,6 +1952,8 @@ DEF robotis_op2 Robot {
                                     damping Damping {
                                     }
                                   }
+                                  linearVelocity 8.748148060952575e-07 8.705346447469612e-07 -2.2749554999030438e-07
+                                  angularVelocity -3.907592314790816e-06 2.5160182595789207e-06 3.2765819422492945e-06
                                 }
                               }
                             ]
@@ -2013,6 +2043,8 @@ DEF robotis_op2 Robot {
                         5.3020311e-06 4.3636051e-07 -6.4855932e-06
                       ]
                     }
+                    linearVelocity 6.233906806908715e-07 7.412289302153051e-07 -4.320134614947985e-07
+                    angularVelocity -3.93330106776879e-06 2.5325715883247935e-06 3.2981394812774916e-06
                   }
                 }
               ]
@@ -2039,6 +2071,8 @@ DEF robotis_op2 Robot {
                   -2.0812626e-06 -8.8143449e-07 1.8251448e-06
                 ]
               }
+              linearVelocity 2.5343557280206694e-07 3.4113789449078236e-07 -5.663680465639668e-07
+              angularVelocity -3.935597885687725e-06 2.5340510385186803e-06 3.3000637287486294e-06
             }
           }
         ]
@@ -2063,11 +2097,13 @@ DEF robotis_op2 Robot {
             1.6911839e-06 -4.5174329e-07 3.3406955e-07
           ]
         }
+        linearVelocity 6.130582041049571e-08 2.6877146012119236e-07 -7.740444209891669e-07
+        angularVelocity -3.912629023749834e-06 2.3645876330302943e-06 1.951370991592941e-06
       }
     }
     DEF DShoulderR HingeJoint {
       jointParameters HingeJointParameters {
-        position -0.4145403466777169
+        position 0.4233103206198662
         axis -1 0 0
         anchor -0.082 0 0
         dampingConstant 0.002
@@ -2087,8 +2123,8 @@ DEF robotis_op2 Robot {
         }
       ]
       endPoint Solid {
-        translation -0.08200000612283159 -3.5459761934800313e-06 2.4415649447644696e-06
-        rotation 0.9999999999999797 1.6805590990420287e-07 1.1224261811998502e-07 0.41450302087553353
+        translation -0.08200000612283159 -5.578894307587139e-07 4.2689513849745715e-06
+        rotation -0.9999999999999805 1.9502851156629223e-07 3.3462457358148065e-08 0.4233476364624557
         children [
           DEF DShoulderRShape Shape {
             appearance USE METAL_APPEARANCE
@@ -2106,7 +2142,7 @@ DEF robotis_op2 Robot {
           }
           DEF DArmUpperR HingeJoint {
             jointParameters HingeJointParameters {
-              position -0.6700000131194082
+              position -0.6700001709615281
               axis 0 0 -1
               anchor 0 -0.016 0
               dampingConstant 0.002
@@ -2127,7 +2163,7 @@ DEF robotis_op2 Robot {
             ]
             endPoint Solid {
               translation 0 -0.016 0
-              rotation 0 0 -1 0.11538562038523999
+              rotation 0 0 -1 0.11538546254052484
               children [
                 DEF DArmUpperRShape Group {
                   children [
@@ -2159,7 +2195,7 @@ DEF robotis_op2 Robot {
                 }
                 DEF DArmLowerR HingeJoint {
                   jointParameters HingeJointParameters {
-                    position 0.714540231900663
+                    position -0.25000090614484494
                     axis -1 0 0
                     anchor 0 -0.06 0.016
                     dampingConstant 0.002
@@ -2180,7 +2216,7 @@ DEF robotis_op2 Robot {
                   ]
                   endPoint Solid {
                     translation 0 -0.06 0.016
-                    rotation -0.9999999999999999 0 0 2.2830889610057294
+                    rotation -1 0 0 1.3185478229599519
                     children [
                       TouchSensor {
                         translation 0 -0.073 -0.016
@@ -2250,7 +2286,7 @@ DEF robotis_op2 Robot {
                               }
                               HingeJoint {
                                 jointParameters HingeJointParameters {
-                                  position 0.9999981150227049
+                                  position 0.9999999992519277
                                   anchor 0 0.01 0
                                   dampingConstant 0.002
                                   staticFriction 0.025
@@ -2269,8 +2305,8 @@ DEF robotis_op2 Robot {
                                   }
                                 ]
                                 endPoint Solid {
-                                  translation 0.0004999999999767607 0.013379320181906575 0.010715893635537373
-                                  rotation 1 0 0 1.093433115492733
+                                  translation 0.0004999999999766271 0.013379299990700692 0.010715900002932285
+                                  rotation 1 0 0 1.0934349997180521
                                   children [
                                     TouchSensor {
                                       translation 0.02 0.01 -0.008
@@ -2362,6 +2398,8 @@ DEF robotis_op2 Robot {
                                     damping Damping {
                                     }
                                   }
+                                  linearVelocity 8.669320496951513e-07 4.6981779957272283e-07 2.0077905690994396e-07
+                                  angularVelocity -3.908688974431974e-06 2.5243261640634683e-06 3.3408301016479553e-06
                                 }
                               }
                             ]
@@ -2453,6 +2491,8 @@ DEF robotis_op2 Robot {
                       damping Damping {
                       }
                     }
+                    linearVelocity 6.144852190448828e-07 3.060333889190523e-07 2.9175079929400373e-08
+                    angularVelocity -3.908688970422297e-06 2.5243261151847016e-06 3.3408303341995753e-06
                   }
                 }
               ]
@@ -2479,6 +2519,8 @@ DEF robotis_op2 Robot {
                   2.0812626e-06 8.8143449e-07 1.8251448e-06
                 ]
               }
+              linearVelocity 2.4929655962054883e-07 -2.2317174919425495e-08 -1.5329462559483393e-07
+              angularVelocity -3.936701214830086e-06 2.5424183579159056e-06 3.364771859055385e-06
             }
           }
         ]
@@ -2503,6 +2545,8 @@ DEF robotis_op2 Robot {
             -1.6911839e-06 4.5174329e-07 3.3406955e-07
           ]
         }
+        linearVelocity 6.154032564617763e-08 -6.267637615356781e-09 -4.402641549515743e-07
+        angularVelocity -3.9126293378909605e-06 2.3645878995470533e-06 1.951371858205447e-06
       }
     }
     DEF DHeadBackLED Transform {
@@ -2585,4 +2629,6 @@ DEF robotis_op2 Robot {
   ]
   window "robotis-op2_window"
   remoteControl "robotis-op2_tcpip"
+  linearVelocity 3.604738087031199e-08 -1.449498146656951e-07 -3.234717611906645e-07
+  angularVelocity -3.912631147851443e-06 2.3645914565055454e-06 1.9513764163590734e-06
 }

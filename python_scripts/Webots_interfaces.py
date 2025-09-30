@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import shutil
 sys.path.append('D:/Webots/Webots2021a/Webots/projects/robots/robotis/darwin-op/libraries/python37')
-from managers import RobotisOp2GaitManager, RobotisOp2MotionManager
+#from managers import RobotisOp2GaitManager, RobotisOp2MotionManager
 from python_scripts.Project_config import path_list
 
 class Darwin:
@@ -26,9 +26,9 @@ class Darwin:
         # 基础设备初始化
         self.robot = robot
         self.timestep = int(robot.getBasicTimeStep())
-        self.gaitManager = RobotisOp2GaitManager(robot, 'config.ini')
-        self.motionManager = RobotisOp2MotionManager(robot)
-        self.gaitManager.setBalanceEnable(True)
+        #self.gaitManager = RobotisOp2GaitManager(robot, 'config.ini')
+        #self.motionManager = RobotisOp2MotionManager(robot)
+        #self.gaitManager.setBalanceEnable(True)
         # 舵机列表初始化
         self.motors = []
         self.motors_sensors = []
@@ -569,11 +569,12 @@ class Environment:
         return self.state
 
     
-    def step(self, state, action, steps, catch_flag, gps1, gps2, gps3, gps4, img_name):
+    def step(self, state, action_shouder, action_arm, steps, catch_flag, gps1, gps2, gps3, gps4, img_name):
         """执行一步动作
         参数:
             state: 当前状态
-            action: 要执行的动作
+            action_shouder: 肩膀舵机动作
+            action_arm: 手臂舵机动作
             steps: 步数
             catch_flag: 抓取器状态
             gps1-4: GPS位置信息
@@ -581,12 +582,12 @@ class Environment:
         返回:
             tuple: (next_state, reward, done, good, goal, count)
         """
-        from python_scripts.DQN.RobotRun1 import RobotRun
-        return RobotRun(self.robot, state, action, steps, catch_flag, gps1, gps2, gps3, gps4, img_name).run()
+        from python_scripts.PPO.RobotRun1 import RobotRun
+        return RobotRun(self.robot, state, action_shouder, action_arm, steps, catch_flag, gps1, gps2, gps3, gps4, img_name).run()
     
-    def step2(self, state, action, steps, zhua, gps0, gps1, gps2, gps3, gps4):
-        from python_scripts.DQN.RobotRun2 import RobotRun2
-        return RobotRun2(self.robot, state, action, steps, zhua, gps0, gps1, gps2, gps3, gps4).run()
+    def step2(self, state, action_leg_upper, action_leg_lower, action_ankle, steps, zhua, gps0, gps1, gps2, gps3, gps4):
+        from python_scripts.PPO.RobotRun2 import RobotRun2
+        return RobotRun2(self.robot, state, action_leg_upper, action_leg_lower, action_ankle, steps, zhua, gps0, gps1, gps2, gps3, gps4).run()
     
     def get_robot_state(self):
         """获取机器人的关节状态，即舵机角度"""

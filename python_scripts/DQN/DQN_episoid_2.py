@@ -4,21 +4,29 @@ from python_scripts.DQN.DQN_DQNnet_2 import DQN2
 from python_scripts.Webots_interfaces import Environment
 from python_scripts.Project_config import path_list, BATCH_SIZE, LR, EPSILON, GAMMA, TARGET_REPLACE_ITER, MEMORY_CAPACITY, device, gps_goal, gps_goal1
 
-def DQN_tai_episoid(dqn2=None, existing_env=None ,total_episoid=0, episode=0, rpm_2=None, log_writer_tai=None, log_file_latest_tai=None):
+def DQN_tai_episoid(dqn2_LegUpper=None, dqn2_LegLower=None, dqn2_Ankle=None, existing_env=None ,total_episoid=0, episode=0, rpm_legUpper=None, rpm_legLower=None, rpm_Ankle=None, log_writer_tai=None, log_file_latest_tai=None):
     """
     抬腿训练函数
     Args:
         total_episoid: 总训练周期数
         episode: 抬腿的总周期数
         existing_env: 现有的环境实例
-        rpm_2: 经验回放缓冲区
+        rpm_legUpper: 经验回放缓冲区
+        rpm_legLower: 经验回放缓冲区
+        rpm_Ankle: 经验回放缓冲区
         log_writer_tai: 日志记录器
         log_file_latest_tai: 日志文件路径
-        dqn2: DQN2模型实例，如果为None则创建新实例
+        dqn2_LegUpper: DQN2模型实例，如果为None则创建新实例
+        dqn2_LegLower: DQN2模型实例，如果为None则创建新实例
+        dqn2_Ankle: DQN2模型实例，如果为None则创建新实例
     """
     # 如果没有传入dqn2，则创建一个新的实例
-    if dqn2 is None:
-        dqn2 = DQN2()
+    if dqn2_LegUpper is None:
+        dqn2_LegUpper = DQN2()
+    if dqn2_LegLower is None:
+        dqn2_LegLower = DQN2()
+    if dqn2_Ankle is None:
+        dqn2_Ankle = DQN2()
     # 使用已有的环境实例或创建新的
     if existing_env is not None:
         env = existing_env
@@ -48,12 +56,14 @@ def DQN_tai_episoid(dqn2=None, existing_env=None ,total_episoid=0, episode=0, rp
         obs_img, obs_tensor = env.get_img(steps, imgs)
         robot_state = env.get_robot_state()
         # 选择动作
-        action = dqn2.choose_action(episode, robot_state)
+        action_LegUpper = dqn2_LegUpper.choose_action(episode, robot_state)
+        action_LegLower = dqn2_LegLower.choose_action(episode, robot_state)
+        action_Ankle = dqn2_Ankle.choose_action(episode, robot_state)
         print("第", steps + 1, "步")
-        print(f"选择动作: {action}")
+        print(f"选择动作: {action_LegUpper}, {action_LegLower}, {action_Ankle}")
         
-        # 记录动作
-        log_writer_tai.add_action(action)
+        # 记录腿部动作
+        log_writer_tai.add_leg_action(action_LegUpper, action_LegLower, action_Ankle)
             
         # 获取GPS数据
         gps_values = env.print_gps()
@@ -66,7 +76,7 @@ def DQN_tai_episoid(dqn2=None, existing_env=None ,total_episoid=0, episode=0, rp
             
         # 执行动作
         next_state, reward, done, good, goal, count = env.step2(
-            robot_state, action, steps, catch_flag, 
+            robot_state, action_LegUpper, action_LegLower, action_Ankle, steps, catch_flag, 
             gps_values[4], gps_values[0], gps_values[1], gps_values[2], gps_values[3],
         )
         
@@ -92,7 +102,9 @@ def DQN_tai_episoid(dqn2=None, existing_env=None ,total_episoid=0, episode=0, rp
         
         # 存储经验
         if good == 1:
-            rpm_2.append((robot_state, action, reward, next_state, done))
+            rpm_legUpper.append((robot_state, action_LegUpper, reward, next_state, done))
+            rpm_legLower.append((robot_state, action_LegLower, reward, next_state, done))
+            rpm_Ankle.append((robot_state, action_Ankle, reward, next_state, done))
             
         # 更新状态
         robot_state = env.get_robot_state()
@@ -106,17 +118,23 @@ def DQN_tai_episoid(dqn2=None, existing_env=None ,total_episoid=0, episode=0, rp
         if episode % 50 == 0:
             save_path = path_list['model_path_tai_DQN'] + f"/dqn_model_tai_{total_episoid}_{episode}.ckpt"
             print(f"保存模型到: {save_path}")
-            torch.save(dqn2.eval_net, save_path)
+            torch.save(dqn2_LegUpper.eval_net, save_path)
+            torch.save(dqn2_LegLower.eval_net, save_path)
+            torch.save(dqn2_Ankle.eval_net, save_path)
         # 学习过程
-        if len(rpm_2) > 1000 and done == 1:
+        if len(rpm_legUpper) > 1000 and done == 1:
             # 如果达到目标，保存模型
             if goal == 1:
                 save_path = path_list['model_path_tai_DQN'] + f"/dqn_model_tai_{total_episoid}_{episode}.ckpt"
-                torch.save(dqn2.eval_net, save_path)
+                torch.save(dqn2_LegUpper.eval_net, save_path)
+                torch.save(dqn2_LegLower.eval_net, save_path)
+                torch.save(dqn2_Ankle.eval_net, save_path)
                 
                 # 学习
-            loss = dqn2.learn(rpm_2)
-                
+            loss_LegUpper = dqn2_LegUpper.learn(rpm_legUpper)
+            loss_LegLower = dqn2_LegLower.learn(rpm_legLower)
+            loss_Ankle = dqn2_Ankle.learn(rpm_Ankle)
+            loss = loss_LegUpper + loss_LegLower + loss_Ankle    
             # 记录损失值
             log_writer_tai.add(loss=loss)
                 

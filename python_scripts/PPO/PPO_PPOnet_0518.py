@@ -114,13 +114,18 @@ class ActorCritic(nn.Module):
         features = self.relu(features)
         features = self.dropout(features)
         
-        # Actor输出
-        action_probs = torch.softmax(self.actor(features), dim=1)
+         # 计算均值和标准差
+        mu = torch.tanh(self.actor_mu(features))  # 使用tanh将均值限制在[-1,1]
+        # 使用softplus确保标准差为正数，并添加一个小的epsilon避免数值问题
+        sigma = F.softplus(self.actor_sigma(features)) + 1e-4
         
-        # Critic输出
+        # 创建正态分布
+        dist = torch.distributions.Normal(mu, sigma)
+        
+        # 计算状态值
         value = self.critic(features)
         
-        return action_probs, value
+        return dist, value
 
 class PPO:
     def __init__(self, node_num, env_information):
@@ -189,16 +194,14 @@ class PPO:
             # 获取动作概率和状态值
             action_probs, value = self.policy(x, state, x_graph)
             
-            if use_random:
-                # 探索：随机选择动作
-                action = np.random.randint(0, action_probs.shape[1])
-                action = torch.tensor(action, device=device)
+            if episode_num < 500:  # 前500回合增加探索
+                action = dist.sample()  # 从分布中采样动作
             else:
-                # 利用：使用策略网络生成动作
-                # 创建分类分布
-                dist = torch.distributions.Categorical(action_probs)
-                # 采样动作
-                action = dist.sample()
+                # 减少探索，更倾向于选取高概率动作
+                if np.random.random() < 0.8:
+                    action = torch.argmax(action_probs)  # 选择概率最大的动作
+                else:
+                    action = dist.sample()  # 从分布中采样动作
             
             # 计算动作的对数概率（即使是随机动作也要计算）
             dist = torch.distributions.Categorical(action_probs)

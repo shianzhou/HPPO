@@ -43,76 +43,340 @@ class Log_write:
             'start time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'save time': [],
             'episode_num': [],
-            'action_list': [[]],  # 初始化动作列表，包含一个空列表用于第一个序列
+            #'action_list': [[]],  # 初始化动作列表，包含一个空列表用于第一个序列
+            'shoulder_actions': [[]],  # 存储肩膀动作
+            'arm_actions': [[]],        # 存储手臂动作
             'log_prob_list': [[]],  # 初始化对数概率列表
-            'value_list': [[]]  # 初始化状态价值列表
+            'value_list': [[]],  # 初始化状态价值列表
+            # 分别记录三个智能体的loss值
+            'loss_shoulder': [],  # 肩部智能体loss
+            'loss_arm': [],       # 臂部智能体loss
+            'loss_hppo': [],      # 离散门控智能体loss
+            'loss_total': [],     # 总loss
+            # 抬腿阶段loss
+            'loss_LegUpper': [],  # 上腿智能体loss
+            'loss_LegLower': [],  # 下腿智能体loss
+            'loss_Ankle': [],     # 踝关节智能体loss
+            'loss_hppo_tai': [],  # 抬腿阶段离散门控智能体loss
+            'loss_total_tai': []  # 抬腿阶段总loss
         }
         # 注意：不再有 self.action_list 实例变量
 
-    def add_action(self, action):
+    def add_action_catch(self, a_shoulder, a_arm):
         """
-        将单个动作添加到当前活动的操作序列中。
-        动作会被添加到 self.data['action_list'] 的最后一个子列表中。
+        将两个动作添加到当前活动的操作序列中。
+        动作会被添加到 self.data['shoulder_actions']和self.data['arm_actions'] 的最后一个子列表中。
         """
-        # 确保 action_list 存在且至少有一个子列表 (通常由 __init__ 保证)
-        if 'action_list' not in self.data or not self.data['action_list']:
-            self.data['action_list'] = [[]] # 安全措施，理论上不应触发
+        # 确保 shoulder_actions 存在且至少有一个子列表 (通常由 __init__ 保证)
+        if 'shoulder_actions' not in self.data or not self.data['shoulder_actions']:
+            self.data['shoulder_actions'] = [[]] # 安全措施，理论上不应触发
 
-        # 如果 action 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
-        action_item = action
-        if hasattr(action, 'item') and callable(action.item):
+        # 确保 arm_actions 存在且至少有一个子列表 (通常由 __init__ 保证)
+        if 'arm_actions' not in self.data or not self.data['arm_actions']:
+            self.data['arm_actions'] = [[]] # 安全措施，理论上不应触发
+
+        # 如果 shoulder_action 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
+        shoulder_action_item = a_shoulder
+        if hasattr(a_shoulder, 'item') and callable(a_shoulder.item):
             try:
-                action_item = action.item()
+                shoulder_action_item = a_shoulder.item()
             except Exception as e:
-                print(f"Warning: Could not call .item() on action {action}: {e}")
+                print(f"Warning: Could not call .item() on action shoulder {a_shoulder}: {e}...73")
+                # 保持 action 原样，或根据需要处理错误
+
+        # 如果 arm_action 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
+        arm_action_item = a_arm
+        if hasattr(a_arm, 'item') and callable(a_arm.item):
+            try:
+                arm_action_item = a_arm.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on action arm {a_arm}: {e}...82")
                 # 保持 action 原样，或根据需要处理错误
 
         # 检查转换后的类型是否为基本数字类型（int 或 float）
-        if not isinstance(action_item, (int, float)):
-            print(f"Warning: Adding non-standard action type '{type(action_item).__name__}' to action list. Value: {action_item}")
+        if not isinstance(shoulder_action_item, (int, float)):
+            print(f"Warning: Adding non-standard action type '{type(shoulder_action_item).__name__}' to action list. Value: {shoulder_action_item}")
+
+        # 检查转换后的类型是否为基本数字类型（int 或 float）
+        if not isinstance(arm_action_item, (int, float)):
+            print(f"Warning: Adding non-standard action type '{type(arm_action_item).__name__}' to action list. Value: {arm_action_item}")
 
         # 将动作添加到最后一个（当前活动的）序列中
-        self.data['action_list'][-1].append(action_item)
+        self.data['shoulder_actions'][-1].append(shoulder_action_item)
+        self.data['arm_actions'][-1].append(arm_action_item)
         
-    def add_log_prob(self, log_prob):
+    def add_action_tai(self, action_LegUpper, action_LegLower, action_Ankle):
+        """
+        将三个动作添加到当前活动的操作序列中。
+        动作会被添加到 self.data['LegUpper_actions']和self.data['LegLower_actions']和self.data['Ankle_actions'] 的最后一个子列表中。
+        """
+        # 确保所有动作列表都存在且至少有一个子列表
+        for action_type in ['LegUpper_actions', 'LegLower_actions', 'Ankle_actions']:
+            if action_type not in self.data or not self.data[action_type]:
+                self.data[action_type] = [[]]  # 安全措施，理论上不应触发
+
+        # 如果 shoulder_action 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
+        LegUpper_action_item = action_LegUpper
+        if hasattr(action_LegUpper, 'item') and callable(action_LegUpper.item):
+            try:
+                LegUpper_action_item = action_LegUpper.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on action LegUpper {action_LegUpper}: {e}...113")
+                # 保持 action 原样，或根据需要处理错误
+
+        # 如果 arm_action 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
+        LegLower_action_item = action_LegLower
+        if hasattr(action_LegLower, 'item') and callable(action_LegLower.item):
+            try:
+                LegLower_action_item = action_LegLower.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on action LegLower {action_LegLower}: {e}...122")
+                # 保持 action 原样，或根据需要处理错误
+
+        # 如果 Ankle_action 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
+        Ankle_action_item = action_Ankle
+        if hasattr(action_Ankle, 'item') and callable(action_Ankle.item):
+            try:
+                Ankle_action_item = action_Ankle.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on action Ankle {action_Ankle}: {e}...129")
+                # 保持 action 原样，或根据需要处理错误
+
+        # 检查转换后的类型是否为基本数字类型（int 或 float）
+        for item, name in [(LegUpper_action_item, 'LegUpper_action_item'),
+                          (LegLower_action_item, 'LegLower_action_item'),
+                          (Ankle_action_item, 'Ankle_action_item')]:
+            if not isinstance(item, (int, float)):
+                print(f"Warning: Adding non-standard action type '{type(item).__name__}' to action list. Value: {item}")
+       
+        # 将动作添加到最后一个（当前活动的）序列中
+        self.data['LegUpper_actions'][-1].append(LegUpper_action_item)
+        self.data['LegLower_actions'][-1].append(LegLower_action_item)
+        self.data['Ankle_actions'][-1].append(Ankle_action_item)
+
+    def add_log_prob_catch(self, log_prob_shoulder, log_prob_arm):
         """
         将对数概率添加到当前活动的序列中。
-        对数概率会被添加到 self.data['log_prob_list'] 的最后一个子列表中。
+        对数概率会被添加到 self.data['log_prob_list_shoulder'] 的最后一个子列表中。
         """
         # 确保 log_prob_list 存在且至少有一个子列表
-        if 'log_prob_list' not in self.data or not self.data['log_prob_list']:
-            self.data['log_prob_list'] = [[]]
+        if 'log_prob_list_shoulder' not in self.data or not self.data['log_prob_list_shoulder']:
+            self.data['log_prob_list_shoulder'] = [[]]
+        if 'log_prob_list_arm' not in self.data or not self.data['log_prob_list_arm']:
+            self.data['log_prob_list_arm'] = [[]]
             
         # 如果 log_prob 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
-        log_prob_item = log_prob
-        if hasattr(log_prob, 'item') and callable(log_prob.item):
+        log_prob_item = log_prob_shoulder
+        if hasattr(log_prob_shoulder, 'item') and callable(log_prob_shoulder.item):
             try:
-                log_prob_item = log_prob.item()
+                log_prob_item = log_prob_shoulder.item()
             except Exception as e:
-                print(f"Warning: Could not call .item() on log_prob {log_prob}: {e}")
+                print(f"Warning: Could not call .item() on log_prob shoulder {log_prob_shoulder}: {e}...163")
                 
         # 将对数概率添加到最后一个序列中
-        self.data['log_prob_list'][-1].append(float(log_prob_item))
+        self.data['log_prob_list_shoulder'][-1].append(float(log_prob_item))
         
-    def add_value(self, value):
+        # 如果 log_prob 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
+        log_prob_item = log_prob_arm
+        if hasattr(log_prob_arm, 'item') and callable(log_prob_arm.item):
+            try:
+                log_prob_item = log_prob_arm.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on log_prob arm {log_prob_arm}: {e}...176")
+                
+        # 将对数概率添加到最后一个序列中
+        self.data['log_prob_list_arm'][-1].append(float(log_prob_item))
+
+    def add_log_prob_tai(self, log_prob_LegUpper, log_prob_LegLower, log_prob_Ankle):
+        """
+        将对数概率添加到当前活动的序列中。
+        对数概率会被添加到 self.data['log_prob_list_LegUpper'] 的最后一个子列表中。
+        """
+        # 确保 log_prob_list 存在且至少有一个子列表
+        if 'log_prob_list_LegUpper' not in self.data or not self.data['log_prob_list_LegUpper']:
+            self.data['log_prob_list_LegUpper'] = [[]]
+        if 'log_prob_list_LegLower' not in self.data or not self.data['log_prob_list_LegLower']:
+            self.data['log_prob_list_LegLower'] = [[]]
+        if 'log_prob_list_Ankle' not in self.data or not self.data['log_prob_list_Ankle']:
+            self.data['log_prob_list_Ankle'] = [[]]
+            
+        # 如果 log_prob 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
+        log_prob_item = log_prob_LegUpper
+        if hasattr(log_prob_LegUpper, 'item') and callable(log_prob_LegUpper.item):
+            try:
+                log_prob_item = log_prob_LegUpper.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on log_prob LegUpper {log_prob_LegUpper}: {e}...196")
+                
+        # 将对数概率添加到最后一个序列中
+        self.data['log_prob_list_LegUpper'][-1].append(float(log_prob_item))
+        
+        # 如果 log_prob 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
+        log_prob_item = log_prob_LegLower
+        if hasattr(log_prob_LegLower, 'item') and callable(log_prob_LegLower.item):
+            try:
+                log_prob_item = log_prob_LegLower.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on log_prob LegLower {log_prob_LegLower}: {e}...206")
+                
+        # 将对数概率添加到最后一个序列中
+        self.data['log_prob_list_LegLower'][-1].append(float(log_prob_item))
+
+        # 如果 log_prob 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
+        log_prob_item = log_prob_Ankle
+        if hasattr(log_prob_Ankle, 'item') and callable(log_prob_Ankle.item):
+            try:
+                log_prob_item = log_prob_Ankle.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on log_prob Ankle {log_prob_Ankle}: {e}...220")
+                
+        # 将对数概率添加到最后一个序列中
+        self.data['log_prob_list_Ankle'][-1].append(float(log_prob_item))
+
+    def add_value_catch(self, value_shoulder, value_arm):
         """
         将状态价值添加到当前活动的序列中。
         状态价值会被添加到 self.data['value_list'] 的最后一个子列表中。
         """
         # 确保 value_list 存在且至少有一个子列表
-        if 'value_list' not in self.data or not self.data['value_list']:
-            self.data['value_list'] = [[]]
+        if 'value_list_shoulder' not in self.data or not self.data['value_list_shoulder']:
+            self.data['value_list_shoulder'] = [[]]
+        if 'value_list_arm' not in self.data or not self.data['value_list_arm']:
+            self.data['value_list_arm'] = [[]]
             
         # 如果 value 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
-        value_item = value
-        if hasattr(value, 'item') and callable(value.item):
+        value_item = value_shoulder
+        if hasattr(value_shoulder, 'item') and callable(value_shoulder.item):
             try:
-                value_item = value.item()
+                value_item = value_shoulder.item()
             except Exception as e:
-                print(f"Warning: Could not call .item() on value {value}: {e}")
+                print(f"Warning: Could not call .item() on value shoulder {value_shoulder}: {e}...242")
                 
         # 将状态价值添加到最后一个序列中
-        self.data['value_list'][-1].append(float(value_item))
+        self.data['value_list_shoulder'][-1].append(float(value_item))
+
+        # 如果 value 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
+        value_item = value_arm
+        if hasattr(value_arm, 'item') and callable(value_arm.item):
+            try:
+                value_item = value_arm.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on value arm {value_arm}: {e}...256")
+                
+        # 将状态价值添加到最后一个序列中
+        self.data['value_list_arm'][-1].append(float(value_item))
+
+    def add_value_tai(self, value_LegUpper, value_LegLower, value_Ankle):
+        """
+        将状态价值添加到当前活动的序列中。
+        状态价值会被添加到 self.data['value_list'] 的最后一个子列表中。
+        """
+        # 确保 value_list 存在且至少有一个子列表
+        if 'value_list_LegUpper' not in self.data or not self.data['value_list_LegUpper']:
+            self.data['value_list_LegUpper'] = [[]]
+        if 'value_list_LegLower' not in self.data or not self.data['value_list_LegLower']:
+            self.data['value_list_LegLower'] = [[]]
+        if 'value_list_Ankle' not in self.data or not self.data['value_list_Ankle']:
+            self.data['value_list_Ankle'] = [[]]
+                
+        # 如果 value 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
+        value_item = value_LegUpper
+        if hasattr(value_LegUpper, 'item') and callable(value_LegUpper.item):
+            try:
+                value_item = value_LegUpper.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on value LegUpper {value_LegUpper}: {e}...277")
+                
+        # 将状态价值添加到最后一个序列中
+        self.data['value_list_LegUpper'][-1].append(float(value_item))
+
+        # 如果 value 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
+        value_item = value_LegLower
+        if hasattr(value_LegLower, 'item') and callable(value_LegLower.item):
+            try:
+                value_item = value_LegLower.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on value LegLower {value_LegLower}: {e}...292")
+                
+        # 将状态价值添加到最后一个序列中
+        self.data['value_list_LegLower'][-1].append(float(value_item))
+
+        # 如果 value 是 Tensor 或 NumPy scalar，获取其 Python 基本类型值
+        value_item = value_Ankle
+        if hasattr(value_Ankle, 'item') and callable(value_Ankle.item):
+            try:
+                value_item = value_Ankle.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on value Ankle {value_Ankle}: {e}...306")
+                
+        # 将状态价值添加到最后一个序列中
+        self.data['value_list_Ankle'][-1].append(float(value_item))
+
+    def add_loss_catch(self, loss_shoulder, loss_arm, loss_hppo, loss_total):
+        """
+        记录抓取阶段三个智能体的loss值
+        Args:
+            loss_shoulder: 肩部智能体loss
+            loss_arm: 臂部智能体loss  
+            loss_hppo: 离散门控智能体loss
+            loss_total: 总loss
+        """
+        # 处理Tensor类型
+        if hasattr(loss_shoulder, 'item') and callable(loss_shoulder.item):
+            try:
+                loss_shoulder = loss_shoulder.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on loss_shoulder {loss_shoulder}: {e}")
+        
+        if hasattr(loss_arm, 'item') and callable(loss_arm.item):
+            try:
+                loss_arm = loss_arm.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on loss_arm {loss_arm}: {e}")
+                
+        if hasattr(loss_hppo, 'item') and callable(loss_hppo.item):
+            try:
+                loss_hppo = loss_hppo.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on loss_hppo {loss_hppo}: {e}")
+                
+        if hasattr(loss_total, 'item') and callable(loss_total.item):
+            try:
+                loss_total = loss_total.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on loss_total {loss_total}: {e}")
+        
+        # 记录loss值
+        self.data['loss_shoulder'].append(float(loss_shoulder))
+        self.data['loss_arm'].append(float(loss_arm))
+        self.data['loss_hppo'].append(float(loss_hppo))
+        self.data['loss_total'].append(float(loss_total))
+
+    def add_loss_tai(self, loss_LegUpper, loss_LegLower, loss_Ankle, loss_hppo, loss_total):
+        """
+        记录抬腿阶段三个智能体的loss值
+        Args:
+            loss_LegUpper: 上腿智能体loss
+            loss_LegLower: 下腿智能体loss
+            loss_Ankle: 踝关节智能体loss
+            loss_hppo: 离散门控智能体loss
+            loss_total: 总loss
+        """
+        # 处理Tensor类型
+        for loss_name, loss_value in [('LegUpper', loss_LegUpper), ('LegLower', loss_LegLower), 
+                                     ('Ankle', loss_Ankle), ('hppo', loss_hppo), ('total', loss_total)]:
+            if hasattr(loss_value, 'item') and callable(loss_value.item):
+                try:
+                    loss_value = loss_value.item()
+                except Exception as e:
+                    print(f"Warning: Could not call .item() on loss_{loss_name} {loss_value}: {e}")
+        
+        # 记录loss值
+        self.data['loss_LegUpper'].append(float(loss_LegUpper))
+        self.data['loss_LegLower'].append(float(loss_LegLower))
+        self.data['loss_Ankle'].append(float(loss_Ankle))
+        self.data['loss_hppo_tai'].append(float(loss_hppo))
+        self.data['loss_total_tai'].append(float(loss_total))
 
     def add(self, **kwargs):
         """
@@ -134,26 +398,45 @@ class Log_write:
         准备开始记录下一个新的序列。
         会在所有列表中添加一个新的空列表。
         """
-        # 处理action_list
-        if 'action_list' in self.data and self.data['action_list']:
-            if self.data['action_list'][-1]: # 检查最后一个列表是否非空
-                self.data['action_list'].append([])
+        # 处理shoulder_actions
+        if 'shoulder_actions' in self.data and self.data['shoulder_actions']:
+            if self.data['shoulder_actions'][-1]: # 检查最后一个列表是否非空
+                self.data['shoulder_actions'].append([])
         else:
-            self.data['action_list'] = [[]]
+            self.data['shoulder_actions'] = [[]]
+            
+        # 处理arm_actions
+        if 'arm_actions' in self.data and self.data['arm_actions']:
+            if self.data['arm_actions'][-1]: # 检查最后一个列表是否非空
+                self.data['arm_actions'].append([])
+        else:
+            self.data['arm_actions'] = [[]]
             
         # 处理log_prob_list
-        if 'log_prob_list' in self.data and self.data['log_prob_list']:
-            if self.data['log_prob_list'][-1]: # 检查最后一个列表是否非空
-                self.data['log_prob_list'].append([])
+        if 'log_prob_list_shoulder' in self.data and self.data['log_prob_list_shoulder']:
+            if self.data['log_prob_list_shoulder'][-1]: # 检查最后一个列表是否非空
+                self.data['log_prob_list_shoulder'].append([])
         else:
-            self.data['log_prob_list'] = [[]]
-            
+            self.data['log_prob_list_shoulder'] = [[]]
+        # 处理log_prob_list
+        if 'log_prob_list_arm' in self.data and self.data['log_prob_list_arm']:
+            if self.data['log_prob_list_arm'][-1]: # 检查最后一个列表是否非空
+                self.data['log_prob_list_arm'].append([])
+        else:
+            self.data['log_prob_list_arm'] = [[]]
+
         # 处理value_list
-        if 'value_list' in self.data and self.data['value_list']:
-            if self.data['value_list'][-1]: # 检查最后一个列表是否非空
-                self.data['value_list'].append([])
+        if 'value_list_shoulder' in self.data and self.data['value_list_shoulder']:
+            if self.data['value_list_shoulder'][-1]: # 检查最后一个列表是否非空
+                self.data['value_list_shoulder'].append([])
         else:
-            self.data['value_list'] = [[]]
+            self.data['value_list_shoulder'] = [[]]
+        # 处理value_list
+        if 'value_list_arm' in self.data and self.data['value_list_arm']:
+            if self.data['value_list_arm'][-1]: # 检查最后一个列表是否非空
+                self.data['value_list_arm'].append([])
+        else:
+            self.data['value_list_arm'] = [[]]
 
     def get(self, key):
         """获取指定键的所有历史记录值（一个列表）"""
@@ -174,16 +457,23 @@ class Log_write:
              # 可以选择是继续使用 self.data 还是中止保存
              data_to_save = self.data # 回退到使用原始数据（浅拷贝）
 
-        # 修改episode_num，只保留最大值
-        if 'episode_num' in data_to_save and data_to_save['episode_num']:
-            max_episode = max(data_to_save['episode_num'])
-            data_to_save['episode_num'] = [max_episode]
+        # 修改episode_num和success_catch，只保留最大值
+        for key in ['episode_num', 'success_catch']:
+            if key in data_to_save and data_to_save[key]:
+                max_value = max(data_to_save[key])
+                data_to_save[key] = [max_value]
 
-        # 可选：移除 action_list 末尾的空列表
+        # 可选：移除 shoulder_actions 末尾的空列表
         # 这通常是期望的行为，因为它代表一个已结束但未记录任何动作的序列
-        if 'action_list' in data_to_save and data_to_save['action_list'] and not data_to_save['action_list'][-1]:
-             # print("Removing trailing empty action list before saving.")
-             data_to_save['action_list'] = data_to_save['action_list'][:-1]
+        if 'shoulder_actions' in data_to_save and data_to_save['shoulder_actions'] and not data_to_save['shoulder_actions'][-1]:
+             # print("Removing trailing empty shoulder_actions list before saving.")
+             data_to_save['shoulder_actions'] = data_to_save['shoulder_actions'][:-1]
+
+        # 可选：移除 arm_actions 末尾的空列表
+        # 这通常是期望的行为，因为它代表一个已结束但未记录任何动作的序列
+        if 'arm_actions' in data_to_save and data_to_save['arm_actions'] and not data_to_save['arm_actions'][-1]:
+             # print("Removing trailing empty arm_actions list before saving.")
+             data_to_save['arm_actions'] = data_to_save['arm_actions'][:-1]
 
         # --- JSON 序列化 ---
         try:

@@ -25,7 +25,7 @@ class RobotRun2:
     
     该类负责执行机器人的动作，检测传感器状态，计算奖励，并判断是否完成当前回合
     """
-    def __init__(self, robot, state, action, step, zhua, gps0, gps1, gps2, gps3, gps4):
+    def __init__(self, robot, state, action_leg_upper, action_leg_lower, action_ankle, step, zhua, gps0, gps1, gps2, gps3, gps4):
         """
         初始化RobotRun2类
         
@@ -49,29 +49,30 @@ class RobotRun2:
         self.gps2 = gps2
         self.gps3 = gps3
         self.gps4 = gps4
-        self.action = action  # 当前动作
+        self.action_LegUpper = action_leg_upper  # 当前动作
+        self.action_LegLower = action_leg_lower  # 当前动作
+        self.action_Ankle = action_ankle  # 当前动作
         
-        # 根据动作编号设置不同的关节运动参数
-        if action == 0:
-            # 动作0：腿部上部向后移动，脚踝向后移动
-            self.LegUpper = -0.05
-            self.LegLower = 0
-            self.Ankle = -0.05
-        elif action == 1:
-            # 动作1：腿部上部向前移动，脚踝向前移动
-            self.LegUpper = 0.05
-            self.LegLower = 0
-            self.Ankle = 0.05
-        elif action == 2:
-            # 动作2：腿部下部向后移动，脚踝向后移动
-            self.LegUpper = 0
-            self.LegLower = -0.05
-            self.Ankle = -0.05
-        else:
-            # 动作3：腿部下部向前移动，脚踝向前移动
-            self.LegUpper = 0
-            self.LegLower = 0.05
-            self.Ankle = 0.05
+       # 计算腿部三个关节的目标位置
+        current_leg_upper = self.robot_state[11]  # 左腿上部的当前状态在索引11
+        current_leg_lower = self.robot_state[13]  # 左腿下部的当前状态在索引13
+        current_ankle = self.robot_state[15]      # 左脚踝的当前状态在索引15
+
+        # 将动作值映射到目标位置范围
+        # 假设action_LegUpper, action_LegLower, action_Ankle 的范围是 [-1, 1]
+        leg_upper_target = 1.09 * action_leg_upper +0.59
+        leg_lower_target = 1.14 * action_leg_lower -1.11
+        ankle_target = 1.305 * action_ankle -0.085
+
+        # 计算需要移动的增量
+        self.LegUpper = leg_upper_target - current_leg_upper
+        self.LegLower = leg_lower_target - current_leg_lower
+        self.Ankle = ankle_target - current_ankle
+
+        # 打印调试信息
+        print(f"左腿上部现在位置={current_leg_upper:.3f}, 目标位置={leg_upper_target:.3f}, 差值={self.LegUpper:.3f}")
+        print(f"左腿下部现在位置={current_leg_lower:.3f}, 目标位置={leg_lower_target:.3f}, 差值={self.LegLower:.3f}")
+        print(f"左脚踝现在位置={current_ankle:.3f}, 目标位置={ankle_target:.3f}, 差值={self.Ankle:.3f}")
 
 
         self.if_jia = zhua  # 抓取器状态
@@ -150,7 +151,7 @@ class RobotRun2:
                       [-0.02, 2.25], [-2.25, 0.03], [-1.24, 1.38], [-1.39, 1.22], [-0.68, 1.04], [-1.02, 0.6],
                       [-1.81, 1.81], [-0.36, 0.94]]
         
-        # 初始化当前状态和下一个状态
+        # 初始化当前状态和下一个状态·                                                                                                                                                                                                           
         self.now_state = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         self.next_state = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
