@@ -67,7 +67,7 @@ class MultiDiscreteActorCritic(nn.Module):
         return discrete_probs, value
 
 class HPPO:
-    def __init__(self, num_servos, node_num, env_information=None):
+    def __init__(self, num_servos, node_num, env_information=None ):
         self.num_servos = num_servos
         self.node_num = node_num
         self.env_information = env_information
