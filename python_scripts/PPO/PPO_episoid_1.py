@@ -76,27 +76,35 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
 
     # 加载模型
     # 抓取模型加载
+    # checkpoint = {
+    #     'policy': hppo_agent.policy.state_dict(),
+    #     'optimizer_hppo': hppo_agent.optimizer.state_dict(),
+    #     'episode': i
+    # }
     if model_path:  # 如果指定了模型路径
         try:
             # 从指定路径加载模型
             checkpoint = torch.load(model_path)
-            if isinstance(checkpoint, dict) and 'policy_shoulder' in checkpoint:
+            if isinstance(checkpoint, dict) and 'policy' in checkpoint:
                 # 如果是保存的字典格式 {'policy': state_dict, ...}
                 # ppo_shoulder.policy.load_state_dict(checkpoint['policy_shoulder'])
                 # ppo_arm.policy.load_state_dict(checkpoint['policy_arm'])
-                hppo_agent.policy.load_state_dict(checkpoint[''])
+                hppo_agent.policy.load_state_dict(checkpoint['policy'])
                 # 如果需要加载优化器状态
-                if 'optimizer_shoulder' in checkpoint and ppo_shoulder.optimizer:
-                    ppo_shoulder.optimizer.load_state_dict(checkpoint['optimizer_shoulder'])
-                if 'optimizer_arm' in checkpoint and ppo_arm.optimizer:
-                    ppo_arm.optimizer.load_state_dict(checkpoint['optimizer_arm'])
+                # if 'optimizer_shoulder' in checkpoint and ppo_shoulder.optimizer:
+                #     ppo_shoulder.optimizer.load_state_dict(checkpoint['optimizer_shoulder'])
+                # if 'optimizer_arm' in checkpoint and ppo_arm.optimizer:
+                #     ppo_arm.optimizer.load_state_dict(checkpoint['optimizer_arm'])
+                if'optimizer_hppo' in checkpoint and hppo_agent.optimizer:
+                    hppo_agent.optimizer.load_state_dict(checkpoint['optimizer_hppo'])
                 print(f"从指定模型加载: {model_path}，模型加载成功！")
                 episode_start = int(model_path.split('_')[-1].split('.')[0])
                 print(f"从指定模型加载: {model_path}，从周期 {episode_start} 继续训练")
             else:
                 # 如果是直接保存的模型或状态字典
-                ppo_shoulder.policy.load_state_dict(checkpoint)
-                ppo_arm.policy.load_state_dict(checkpoint)
+                # ppo_shoulder.policy.load_state_dict(checkpoint)
+                # ppo_arm.policy.load_state_dict(checkpoint)
+                hppo_agent.policy.load_state_dict(checkpoint)
                 print("从指定模型加载: {model_path}，模型加载成功！(旧格式)")
                 episode_start = 0
         except Exception as e:
@@ -114,20 +122,24 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             # 加载模型
             try:
                 checkpoint = torch.load(latest_model)
-                if isinstance(checkpoint, dict) and 'policy_shoulder' in checkpoint:
+                if isinstance(checkpoint, dict) and 'policy' in checkpoint:
                     # 如果是保存的字典格式 {'policy': state_dict, ...}
-                    ppo_shoulder.policy.load_state_dict(checkpoint['policy_shoulder'])
-                    ppo_arm.policy.load_state_dict(checkpoint['policy_arm'])
+                    # ppo_shoulder.policy.load_state_dict(checkpoint['policy_shoulder'])
+                    # ppo_arm.policy.load_state_dict(checkpoint['policy_arm'])
+                    hppo_agent.policy.load_state_dict(checkpoint['policy'])
                     # 如果需要加载优化器状态
-                    if 'optimizer_shoulder' in checkpoint and ppo_shoulder.optimizer:
-                        ppo_shoulder.optimizer.load_state_dict(checkpoint['optimizer_shoulder'])
-                    if 'optimizer_arm' in checkpoint and ppo_arm.optimizer:
-                        ppo_arm.optimizer.load_state_dict(checkpoint['optimizer_arm'])
+                    # if 'optimizer_shoulder' in checkpoint and ppo_shoulder.optimizer:
+                    #     ppo_shoulder.optimizer.load_state_dict(checkpoint['optimizer_shoulder'])
+                    # if 'optimizer_arm' in checkpoint and ppo_arm.optimizer:
+                    #     ppo_arm.optimizer.load_state_dict(checkpoint['optimizer_arm'])
+                    if 'optimizer_hppo' in checkpoint and hppo_agent.optimizer:
+                       hppo_agent.optimizer.load_state_dict(checkpoint['optimizer_shoulder'])
                     print("抓取模型加载成功！")
                 else:
                     # 如果是直接保存的模型或状态字典
-                    ppo_shoulder.policy.load_state_dict(checkpoint)
-                    ppo_arm.policy.load_state_dict(checkpoint)
+                    # ppo_shoulder.policy.load_state_dict(checkpoint)
+                    # ppo_arm.policy.load_state_dict(checkpoint)
+                    hppo_agent.policy.load_state_dict(checkpoint)
                     print("抓取模型加载成功！(旧格式)")
             except Exception as e:
                 print(f"抓取模型加载失败: {e}")
@@ -238,6 +250,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
                                             x_graph=robot_state)
 
             d_action = dict['discrete_action']
+
             action_shoulder = dict['continuous_action'][0]
             action_arm = dict['continuous_action'][1]
             log_prob_shoulder = dict['continuous_log_prob'][0]
@@ -391,12 +404,17 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
                 if goal == 1:  # 如果达到目标
                     print("goal = 1")
                     save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i  # 保存模型
+                    # checkpoint = {
+                    #     'policy_shoulder': ppo_shoulder.policy.state_dict(),
+                    #     'optimizer_shoulder': ppo_shoulder.optimizer.state_dict(),
+                    #     'policy_arm': ppo_arm.policy.state_dict(),
+                    #     'optimizer_arm': ppo_arm.optimizer.state_dict(),
+                    #     'episode': i
+                    # }
                     checkpoint = {
-                        'policy_shoulder': ppo_shoulder.policy.state_dict(),
-                        'optimizer_shoulder': ppo_shoulder.optimizer.state_dict(),
-                        'policy_arm': ppo_arm.policy.state_dict(),
-                        'optimizer_arm': ppo_arm.optimizer.state_dict(),
-                        'episode': i
+                        'policy':hppo_agent.policy.state_dict(),
+                        'optimizer_hppo':hppo_agent.optimizer.state_dict(),
+                        'episode':i
                     }
                     torch.save(checkpoint, save_path)
                 # print("11111111111111111111111111111111111111111-303")
@@ -424,11 +442,16 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
                
                 if i % 100 == 0 and i != 0:  # 每100步保存一次模型
                     save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i  # 保存模型
+                    # checkpoint = {
+                    #     'policy_shoulder': ppo_shoulder.policy.state_dict(),
+                    #     'optimizer_shoulder': ppo_shoulder.optimizer.state_dict(),
+                    #     'policy_arm': ppo_arm.policy.state_dict(),
+                    #     'optimizer_arm': ppo_arm.optimizer.state_dict(),
+                    #     'episode': i
+                    # }
                     checkpoint = {
-                        'policy_shoulder': ppo_shoulder.policy.state_dict(),
-                        'optimizer_shoulder': ppo_shoulder.optimizer.state_dict(),
-                        'policy_arm': ppo_arm.policy.state_dict(),
-                        'optimizer_arm': ppo_arm.optimizer.state_dict(),
+                        'policy': hppo_agent.policy.state_dict(),
+                        'optimizer_hppo': hppo_agent.optimizer.state_dict(),
                         'episode': i
                     }
                     torch.save(checkpoint, save_path)
