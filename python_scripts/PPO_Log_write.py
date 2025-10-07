@@ -52,6 +52,7 @@ class Log_write:
             'loss_shoulder': [],  # 肩部智能体loss
             'loss_arm': [],       # 臂部智能体loss
             'loss_hppo': [],      # 离散门控智能体loss
+            'loss_hppo_01': [],
             'loss_total': [],     # 总loss
             # 抬腿阶段loss
             'loss_LegUpper': [],  # 上腿智能体loss
@@ -311,6 +312,15 @@ class Log_write:
                 
         # 将状态价值添加到最后一个序列中
         self.data['value_list_Ankle'][-1].append(float(value_item))
+
+    def add_loss_hppo_catch(self,loss):
+        if hasattr(loss, 'item') and callable(loss.item):
+            try:
+                loss = loss.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on loss_hppo {loss}: {e}")
+        self.data['loss_hppo_01'].append(float(loss))
+
 
     def add_loss_catch(self, loss_shoulder, loss_arm, loss_hppo, loss_total):
         """
