@@ -98,6 +98,7 @@ class HPPO:
         self.num_servos = num_servos
         self.node_num = node_num
         self.env_information = env_information
+        self.device = device
         # 超参数
         self.gamma = 0.99
         self.gae_lambda = 0.95
@@ -128,6 +129,7 @@ class HPPO:
         self.discrete_log_probs = []
         self.continuous_log_probs = []
         self.dones = []
+
 
     def choose_action(self, episode_num, obs, x_graph):
         with torch.no_grad():
@@ -224,11 +226,11 @@ class HPPO:
             advantages.insert(0, gae)
         return torch.tensor(advantages, dtype=torch.float32).to(device)
 
-    def get_value(self, state):
-        state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
-        with torch.no_grad():
-            value = self.critic(state)
-        return value.cpu().data.numpy().squeeze(0)
+    # def get_value(self, state):
+    #     state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
+    #     with torch.no_grad():
+    #         value = self.critic(state)
+    #     return value.cpu().data.numpy().squeeze(0)
 
     def _clear_buffer(self):
         self.states = []
@@ -243,7 +245,7 @@ class HPPO:
 
 
     def learn(self):
-        if len(self.states) < self.batch_size:  # 使用定义的batch_size
+        if len(self.states) < 32:  # 使用定义的batch_size
             return 0
 
         # 计算优势函数和回报（当前实现正确，无需修改）
@@ -285,9 +287,8 @@ class HPPO:
                 [dist.log_prob(batch_continuous_actions[i]) for i, dist in enumerate(all_continuous_dists)])
             all_values = torch.cat(all_values)
 
-            # 计算总概率比（离散和连续对数概率之和）
-            old_total_log_probs = batch_discrete_log_probs + batch_continuous_log_probs
-            new_total_log_probs = new_discrete_log_probs + new_continuous_log_probs
+            old_total_log_probs = (batch_discrete_log_probs + batch_continuous_log_probs).sum(dim=1)
+            new_total_log_probs = (new_discrete_log_probs + new_continuous_log_probs).sum(dim=1)
             ratios = torch.exp(new_total_log_probs - old_total_log_probs)
 
             # PPO裁剪损失
