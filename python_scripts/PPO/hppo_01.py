@@ -80,7 +80,7 @@ class MultiDiscreteActorCritic(nn.Module):
         # discrete_probs = torch.sigmoid(discrete_logits)  # [num_servos]
         discrete_logits = discrete_logits.view(-1, self.num_servos, 2)  # 重塑为 [batch_size, num_servos, 3]
         discrete_probs = F.softmax(discrete_logits, dim=-1)  # 在最后一个维度（动作维度）应用 softmax
-        discrete_dist = Categorical(logits=discrete_probs)
+        discrete_dist = Categorical(probs=discrete_probs)
         #将连续层的输出拆分为均值和方差
         continuous_output = self.continuous(features)
         mu, log_sigma = torch.chunk(continuous_output, 2, dim=-1)  # 拆分
@@ -146,17 +146,35 @@ class HPPO:
             # log_prob = discrete_log_probs.cpu().numpy()
 
             discrete_action = discrete_dist.sample()  # 采样离散动作
-            continuous_action = continuous_dist.sample()  # 采样连续参数
-            continuous_action = torch.clamp(continuous_action,
-                                            min=-1.0,
-                                            max=1.0)
+            # continuous_action = continuous_dist.sample()  # 采样连续参数
+            # continuous_action = torch.clamp(continuous_action,
+            #                                 min=-1.0,
+            #                                 max=1.0)
+            #
+            # # 重新计算裁剪后的对数概率
+            # continuous_log_prob = continuous_dist.log_prob(continuous_action)
+            #
+            # # 2. 计算已采样动作的对数概率
+            # discrete_log_prob = discrete_dist.log_prob(discrete_action)
+            # # continuous_log_prob = continuous_dist.log_prob(continuous_action)
+            if discrete_action.dim() > 1:
+                discrete_action = discrete_action.squeeze(0)  # 移除批次维度
 
-            # 重新计算裁剪后的对数概率
+                # 采样连续动作
+            continuous_action = continuous_dist.sample()
+            if continuous_action.dim() > 1:
+                continuous_action = continuous_action.squeeze(0)
+
+            # 计算对数概率
+            discrete_log_prob = discrete_dist.log_prob(discrete_action)
             continuous_log_prob = continuous_dist.log_prob(continuous_action)
 
-            # 2. 计算已采样动作的对数概率
-            discrete_log_prob = discrete_dist.log_prob(discrete_action)
-            # continuous_log_prob = continuous_dist.log_prob(continuous_action)
+            # 确保对数概率也是正确维度
+            if discrete_log_prob.dim() > 1:
+                discrete_log_prob = discrete_log_prob.squeeze(0)
+            if continuous_log_prob.dim() > 1:
+                continuous_log_prob = continuous_log_prob.squeeze(0)
+
             if isinstance(value, torch.Tensor):
                 value_scalar = value.item()  # 提取浮点数
             else:
@@ -223,66 +241,7 @@ class HPPO:
         self.continuous_log_probs = []
         self.dones = []
 
-    # def learn(self):
-    #     if len(self.states) < 32:
-    #         return 0
-    #
-    #
-    #     advantages = self.calculate_advantages()
-    #     returns = advantages + torch.tensor(self.values, dtype=torch.float32).to(device)
-    #     batch_states = self.states
-    #     batch_discrete_actions = torch.tensor(self.actions, dtype=torch.float32).to(device)  # shape: [batch, num_servos]
-    #     batch_discrete_log_probs = torch.tensor(self.log_probs, dtype=torch.float32).to(device)
-    #     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-    #
-    #
-    #     total_loss = 0
-    #
-    #     for _ in range(self.policy_update_epochs):
-    #         all_discrete_probs = []
-    #         all_values = []
-    #         for i in range(len(batch_states)):
-    #             discrete_probs, value = self.policy(x=batch_states[i][0], state=batch_states[i][1], x_graph=batch_states[i][2])
-    #             all_discrete_probs.append(discrete_probs)
-    #             all_values.append(value)
-    #         all_discrete_probs = torch.stack(all_discrete_probs)  # [batch, num_servos]
-    #         all_values = torch.cat(all_values)
-    #         # 离散部分
-    #         m = Bernoulli(all_discrete_probs)
-    #         new_discrete_log_probs = m.log_prob(batch_discrete_actions)
-    #         discrete_ratio = torch.exp(new_discrete_log_probs - batch_discrete_log_probs)
-    #         # 总ratio（离散部分取均值）
-    #         total_ratio = discrete_ratio.mean(dim=1)
-    #
-    #         surr1 = total_ratio * advantages
-    #         surr2 = torch.clamp(total_ratio, 1 - self.clip_ratio, 1 + self.clip_ratio) * advantages
-    #
-    #         policy_loss = -torch.min(surr1, surr2).mean()
-    #         value_loss = nn.MSELoss()(all_values, returns)
-    #         entropy = m.entropy().mean()
-    #
-    #         loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy
-    #
-    #         self.optimizer.zero_grad()
-    #         loss.backward()
-    #
-    #         # 更严格的梯度裁剪 - 与PPO2保持一致
-    #         torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.1)
-    #
-    #         self.optimizer.step()
-    #         total_loss += loss.item()
-    #
-    #     # 更新学习率
-    #     self.scheduler.step()
-    #
-    #     self.states = []
-    #     self.actions = []
-    #     self.rewards = []
-    #     self.next_states = []
-    #     self.values = []
-    #     self.log_probs = []
-    #     self.dones = []
-    #     return total_loss / self.policy_update_epochs
+
     def learn(self):
         if len(self.states) < self.batch_size:  # 使用定义的batch_size
             return 0
