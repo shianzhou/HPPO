@@ -78,7 +78,7 @@ class MultiDiscreteActorCritic(nn.Module):
         discrete_logits = self.discrete_head(features)
         #
         # discrete_probs = torch.sigmoid(discrete_logits)  # [num_servos]
-        discrete_logits = discrete_logits.view(-1, self.num_servos, 3)  # 重塑为 [batch_size, num_servos, 3]
+        discrete_logits = discrete_logits.view(-1, self.num_servos, 2)  # 重塑为 [batch_size, num_servos, 3]
         discrete_probs = F.softmax(discrete_logits, dim=-1)  # 在最后一个维度（动作维度）应用 softmax
         discrete_dist = Categorical(logits=discrete_probs)
         #将连续层的输出拆分为均值和方差
