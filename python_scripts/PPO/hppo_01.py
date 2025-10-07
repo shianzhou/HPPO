@@ -27,7 +27,7 @@ class MultiDiscreteActorCritic(nn.Module):
         # 共享特征层
         self.fc4 = nn.Linear(300, 200)
         # 多舵机离散动作头
-        self.discrete_head = nn.Linear(200, num_servos)  # 输出num_servos个logit
+        self.discrete_head = nn.Linear(200, num_servos*2)  # 输出num_servos个logit
 
         #连续动作头，输出值是已知所有动作的参数(输出维度因为所有需要参数的二倍)
         self.continuous = nn.Linear(200,num_servos*2)
@@ -157,14 +157,18 @@ class HPPO:
             # 2. 计算已采样动作的对数概率
             discrete_log_prob = discrete_dist.log_prob(discrete_action)
             # continuous_log_prob = continuous_dist.log_prob(continuous_action)
+            if isinstance(value, torch.Tensor):
+                value_scalar = value.item()  # 提取浮点数
+            else:
+                value_scalar = value  # 已经是浮点数，直接使用
 
-            value = value.item()
+
             action_dict = {
                 'discrete_action': discrete_action.cpu().numpy(),
                 'continuous_action': continuous_action.cpu().numpy(),
                 'discrete_log_prob': discrete_log_prob.cpu().numpy(),
                 'continuous_log_prob': continuous_log_prob.cpu().numpy(),
-                'value': value.item()  # 状态价值是标量
+                'value':  value_scalar  # 状态价值是标量
             }
             return action_dict
 
