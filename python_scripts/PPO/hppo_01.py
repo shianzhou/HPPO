@@ -254,7 +254,8 @@ class HPPO:
 
         # 转换为张量并移动到设备
         batch_states = self.states  # 列表，每个元素是状态元组
-        batch_discrete_actions = torch.tensor(self.discrete_actions, dtype=torch.float32).to(self.device)
+        # Categorical 需要 Long 索引
+        batch_discrete_actions = torch.tensor(self.discrete_actions, dtype=torch.long).to(self.device)
         batch_continuous_actions = torch.tensor(self.continuous_actions, dtype=torch.float32).to(self.device)
         batch_discrete_log_probs = torch.tensor(self.discrete_log_probs, dtype=torch.float32).to(self.device)
         batch_continuous_log_probs = torch.tensor(self.continuous_log_probs, dtype=torch.float32).to(self.device)
@@ -282,13 +283,16 @@ class HPPO:
 
             # 计算新策略的对数概率
             new_discrete_log_probs = torch.stack(
-                [dist.log_prob(batch_discrete_actions[i]) for i, dist in enumerate(all_discrete_dists)])
+                [all_discrete_dists[i].log_prob(batch_discrete_actions[i]) for i in range(len(all_discrete_dists))]
+            )  # [B, num_servos]
             new_continuous_log_probs = torch.stack(
-                [dist.log_prob(batch_continuous_actions[i]) for i, dist in enumerate(all_continuous_dists)])
+                [all_continuous_dists[i].log_prob(batch_continuous_actions[i]) for i in range(len(all_continuous_dists))]
+            )  # [B, num_servos]
             all_values = torch.cat(all_values)
 
-            old_total_log_probs = (batch_discrete_log_probs + batch_continuous_log_probs).sum(dim=1)
-            new_total_log_probs = (new_discrete_log_probs + new_continuous_log_probs).sum(dim=1)
+            # 统一在动作维（最后一维）求和并展平成 [B]
+            old_total_log_probs = (batch_discrete_log_probs + batch_continuous_log_probs).sum(dim=-1).view(-1)
+            new_total_log_probs = (new_discrete_log_probs + new_continuous_log_probs).sum(dim=-1).view(-1)
             ratios = torch.exp(new_total_log_probs - old_total_log_probs)
 
             # PPO裁剪损失
