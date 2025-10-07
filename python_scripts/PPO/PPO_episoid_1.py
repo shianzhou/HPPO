@@ -7,16 +7,21 @@ from python_scripts.PPO.Replay_memory import ReplayMemory
 from python_scripts.PPO.Replay_memory_2 import ReplayMemory_2
 from python_scripts.PPO.PPO_episoid_2_1 import PPO_tai_episoid
 from python_scripts.Webots_interfaces import Environment
+from python_scripts.PPO.hppo_01 import HPPO as hppo
+
 # from Data_fusion import data_fusion
 from python_scripts.Project_config import path_list, gps_goal, gps_goal1, device
 from python_scripts.PPO_Log_write import Log_write
 
-def PPO_episoid_1(model_path=None, max_steps_per_episode=500):   
-    ppo_arm = PPO(node_num=19, env_information=None)  # 创建PPO对象
-    ppo_shoulder = PPO(node_num=19, env_information=None)  # 创建PPO对象
+def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
 
-    # 混合动作：两个离散开关（肩、臂是否运动）
-    hppo_switch_catch = HPPO(num_servos=2, node_num=19, env_information=None)
+    hppo_agent = hppo(num_servos=2,node_num=19,env_information=None)
+
+    # ppo_arm = PPO(node_num=19, env_information=None)  # 创建PPO对象
+    # ppo_shoulder = PPO(node_num=19, env_information=None)  # 创建PPO对象
+    #
+    # # 混合动作：两个离散开关（肩、臂是否运动）
+    # hppo_switch_catch = HPPO(num_servos=2, node_num=19, env_information=None)
 
     ppo2_LegUpper = PPO2(node_num=19, env_information=None)  # 创建PPO2对象
     ppo2_LegLower = PPO2(node_num=19, env_information=None)  # 创建PPO2对象
@@ -77,8 +82,9 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             checkpoint = torch.load(model_path)
             if isinstance(checkpoint, dict) and 'policy_shoulder' in checkpoint:
                 # 如果是保存的字典格式 {'policy': state_dict, ...}
-                ppo_shoulder.policy.load_state_dict(checkpoint['policy_shoulder'])
-                ppo_arm.policy.load_state_dict(checkpoint['policy_arm'])
+                # ppo_shoulder.policy.load_state_dict(checkpoint['policy_shoulder'])
+                # ppo_arm.policy.load_state_dict(checkpoint['policy_arm'])
+                hppo_agent.policy.load_state_dict(checkpoint[''])
                 # 如果需要加载优化器状态
                 if 'optimizer_shoulder' in checkpoint and ppo_shoulder.optimizer:
                     ppo_shoulder.optimizer.load_state_dict(checkpoint['optimizer_shoulder'])
@@ -220,20 +226,39 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             # x_graph = torch.tensor(robot_state, dtype=torch.float32).to(device)
             # x_graph = torch.tensor(robot_state, dtype=torch.float32).unsqueeze(1).to(device)  # 添加维度
             # 输入次数、状态，选择动作
-            action_shoulder , log_prob_shoulder , value_shoulder = ppo_shoulder.choose_action(episode_num=i, 
-                                  obs=obs,
-                                  x_graph=robot_state,
-                                  action_type='shoulder')
-            action_arm , log_prob_arm , value_arm = ppo_arm.choose_action(episode_num=i, 
-                                  obs=obs,
-                                  x_graph=robot_state,
-                                  action_type='arm')
+            # action_dict = {
+            #     'discrete_action': discrete_action.cpu().numpy(),
+            #     'continuous_action': continuous_action.cpu().numpy(),
+            #     'discrete_log_prob': discrete_log_prob.cpu().numpy(),
+            #     'continuous_log_prob': continuous_log_prob.cpu().numpy(),
+            #     'value': value.item()  # 状态价值是标量
+            # }
+            dict = hppo_agent.choose_action(episode_num=i,
+                                            obs=obs,
+                                            x_graph=robot_state)
+
+            d_action = dict['discrete_action']
+            action_shoulder = dict['continuous_action'][0]
+            action_arm = dict['continuous_action'][1]
+            log_prob_shoulder = dict['continuous_log_prob'][0]
+            log_prob_arm = dict['continuous_log_prob'][1]
+            value = dict['value']
+
+
+            # action_shoulder , log_prob_shoulder , value_shoulder = ppo_shoulder.choose_action(episode_num=i,
+            #                       obs=obs,
+            #                       x_graph=robot_state,
+            #                       action_type='shoulder')
+            # action_arm , log_prob_arm , value_arm = ppo_arm.choose_action(episode_num=i,
+            #                       obs=obs,
+            #                       x_graph=robot_state,
+            #                       action_type='arm')
             # 离散开关：d0->shoulder, d1->arm (0/1)
-            d_action, d_log_prob, d_value = hppo_switch_catch.choose_action(
-                episode_num=i,
-                obs=obs,
-                x_graph=robot_state
-            )
+            # d_action, d_log_prob, d_value = hppo_switch_catch.choose_action(
+            #     episode_num=i,
+            #     obs=obs,
+            #     x_graph=robot_state
+            # )
             # 转为0/1掩码
             d0 = float(d_action[0])
             d1 = float(d_action[1])
@@ -267,7 +292,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             # 分别添加动作、对数概率和状态价值到日志
             log_writer_catch.add_action_catch(action_shoulder, action_arm) 
             log_writer_catch.add_log_prob_catch(log_prob_shoulder, log_prob_arm)
-            log_writer_catch.add_value_catch(value_shoulder, value_arm)
+            log_writer_catch.add_value_catch(value, value)
             # 执行一步动作
             next_state, reward, done, good, goal, count = env.step(
                 robot_state,
@@ -308,39 +333,52 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
                 # 将当前状态、动作、奖励、下一个状态、是否完成、是否达到目标添加到经验回放缓存中
                 #rpm.append((obs_img, robot_state, action, log_prob, reward, done, value))
                 # 同时将数据存储到PPO对象内部
-                ppo_shoulder.store_transition_catch(
-                    state=[obs_img, robot_state, robot_state],  # 包含图像、机器人状态和图神经网络输入
-                    action_shoulder=action_shoulder,
-                    action_arm=action_arm,                 
-                    reward=reward,
-                    next_state=[next_obs_img, next_state, next_state],  # 包含下一个图像、下一个状态和图神经网络输入
-                    done=done,
-                    value_shoulder=value_shoulder,
-                    value_arm=value_arm,
-                    log_prob_shoulder=log_prob_shoulder,
-                    log_prob_arm=log_prob_arm
-                )
-                ppo_arm.store_transition_catch(
+                # ppo_shoulder.store_transition_catch(
+                #     state=[obs_img, robot_state, robot_state],  # 包含图像、机器人状态和图神经网络输入
+                #     action_shoulder=action_shoulder,
+                #     action_arm=action_arm,
+                #     reward=reward,
+                #     next_state=[next_obs_img, next_state, next_state],  # 包含下一个图像、下一个状态和图神经网络输入
+                #     done=done,
+                #     value_shoulder=value_shoulder,
+                #     value_arm=value_arm,
+                #     log_prob_shoulder=log_prob_shoulder,
+                #     log_prob_arm=log_prob_arm
+                # )
+                # ppo_arm.store_transition_catch(
+                #     state=[obs_img, robot_state, robot_state],
+                #     action_shoulder=action_shoulder,
+                #     action_arm=action_arm,
+                #     reward=reward,
+                #     next_state=[next_obs_img, next_state, next_state],
+                #     done=done,
+                #     value_shoulder=value_shoulder,
+                #     value_arm=value_arm,
+                #     log_prob_shoulder=log_prob_shoulder,
+                #     log_prob_arm=log_prob_arm
+                # )
+                # # 存储离散HPPO轨迹
+                # hppo_switch_catch.store_transition(
+                #     state=[obs_img, robot_state, robot_state],
+                #     action=d_action,
+                #     reward=reward,
+                #     next_state=[next_obs_img, next_state, next_state],
+                #     done=done,
+                #     value=d_value,
+                #     log_prob=d_log_prob
+                # )
+                # self, state, discrete_action, continuous_action, reward, next_state, done, value,
+                # discrete_log_prob, continuous_log_prob
+                hppo_agent.store_transition(
                     state=[obs_img, robot_state, robot_state],
-                    action_shoulder=action_shoulder,
-                    action_arm=action_arm,
+                    discrete_action=d_action,
+                    continuous_action=dict['continuous_action'],
                     reward=reward,
                     next_state=[next_obs_img, next_state, next_state],
                     done=done,
-                    value_shoulder=value_shoulder,
-                    value_arm=value_arm,
-                    log_prob_shoulder=log_prob_shoulder,
-                    log_prob_arm=log_prob_arm
-                )
-                # 存储离散HPPO轨迹
-                hppo_switch_catch.store_transition(
-                    state=[obs_img, robot_state, robot_state],
-                    action=d_action,
-                    reward=reward,
-                    next_state=[next_obs_img, next_state, next_state],
-                    done=done,
-                    value=d_value,
-                    log_prob=d_log_prob
+                    value=value,
+                    discrete_log_prob=dict['discrete_log_prob'],
+                    continuous_log_prob=dict['continuous_log_prob']
                 )
             robot_state = env.get_robot_state()  # 获取机器人状态
 
@@ -361,29 +399,30 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
                         'episode': i
                     }
                     torch.save(checkpoint, save_path)
-                print("11111111111111111111111111111111111111111-303")
-                loss_shoulder = ppo_shoulder.learn(action_type='shoulder')
-                print("22222222222222222222222222222222222222222-305")
-                loss_arm = ppo_arm.learn(action_type='arm')
-                # 学习离散HPPO
-                loss_hppo = hppo_switch_catch.learn()
+                # print("11111111111111111111111111111111111111111-303")
+                # loss_shoulder = ppo_shoulder.learn(action_type='shoulder')
+                # print("22222222222222222222222222222222222222222-305")
+                # loss_arm = ppo_arm.learn(action_type='arm')
+                # # 学习离散HPPO
+                # loss_hppo = hppo_switch_catch.learn()
+                loss_hppo = hppo_agent.learn()
 
-                loss = loss_shoulder + loss_arm + loss_hppo
+                loss =  loss_hppo
 
-                print('loss_arm:', loss_arm)
-                print('loss_shoulder:', loss_shoulder)
-                print('loss_hppo:', loss_hppo)
+                # print('loss_arm:', loss_arm)
+                # print('loss_shoulder:', loss_shoulder)
+                # print('loss_hppo:', loss_hppo)
                 print('loss:', loss)
                 
                 # 分别记录三个智能体的loss值
-                log_writer_catch.add_loss_catch(loss_shoulder, loss_arm, loss_hppo, loss)
+                log_writer_catch.add_loss_hppo_catch(loss)
                 # 立即落盘，避免仅在回合结束保存导致当轮loss缺失
                 try:
                     log_writer_catch.save_catch(log_file_latest_catch)
                 except Exception as _e:
                     print(f"保存抓取loss到日志失败: {_e}")
                
-                if i % 500 == 0 and i != 0:  # 每100步保存一次模型
+                if i % 100 == 0 and i != 0:  # 每100步保存一次模型
                     save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i  # 保存模型
                     checkpoint = {
                         'policy_shoulder': ppo_shoulder.policy.state_dict(),
