@@ -116,7 +116,10 @@ class HPPO:
         
         # 优化器 - 使用更保守的学习率
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.lr)
-        
+
+        self.optimizer_c = torch.optim.Adam(self.policy.continuous.parameters(),lr=self.lr)
+        self.optimizer_d = torch.optim.Adam(self.policy.discrete_head.parameters(), lr=self.lr)
+        self.optimizer_v = torch.optim.Adam(self.policy.critic.parameters(), lr=self.lr)
         # 学习率调度器 - 添加学习率衰减
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=self.lr_decay)
         # 轨迹缓存
@@ -264,6 +267,8 @@ class HPPO:
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         total_loss = 0
+        loss_continuous = 0
+        loss_discrete = 0
 
         for _ in range(self.policy_update_epochs):
             all_discrete_dists = []
@@ -283,22 +288,56 @@ class HPPO:
 
             # 计算新策略的对数概率
             new_discrete_log_probs = torch.stack(
-                [all_discrete_dists[i].log_prob(batch_discrete_actions[i]) for i in range(len(all_discrete_dists))]
+                [all_discrete_dists[i].log_prob(batch_discrete_actions[i]).squeeze(0) for i in range(len(all_discrete_dists))]
             )  # [B, num_servos]
             new_continuous_log_probs = torch.stack(
-                [all_continuous_dists[i].log_prob(batch_continuous_actions[i]) for i in range(len(all_continuous_dists))]
+                [all_continuous_dists[i].log_prob(batch_continuous_actions[i]).squeeze(0) for i in range(len(all_continuous_dists))]
             )  # [B, num_servos]
             all_values = torch.cat(all_values)
 
-            # 统一在动作维（最后一维）求和并展平成 [B]
-            old_total_log_probs = (batch_discrete_log_probs + batch_continuous_log_probs).sum(dim=-1).view(-1)
-            new_total_log_probs = (new_discrete_log_probs + new_continuous_log_probs).sum(dim=-1).view(-1)
-            ratios = torch.exp(new_total_log_probs - old_total_log_probs)
+            # print(f"batch_discrete_log_probs shape: {batch_discrete_log_probs.shape}")
+            # print(f"batch_continuous_log_probs shape: {batch_continuous_log_probs.shape}")
+            # print(f"new_discrete_log_probs shape: {new_discrete_log_probs.shape}")
+            # print(f"new_continuous_log_probs shape: {new_continuous_log_probs.shape}")
+            #
+            # # 统一在动作维（最后一维）求和并展平成 [B]
+            # old_total_log_probs = (batch_discrete_log_probs + batch_continuous_log_probs)
+            # print(f"old_total_log_probs (before sum) shape: {old_total_log_probs.shape}")
+            #
+            # # 计算新策略的总对数概率
+            # new_total_log_probs = (new_discrete_log_probs + new_continuous_log_probs)
+            # print(f"new_total_log_probs (before sum) shape: {new_total_log_probs.shape}")
 
-            # PPO裁剪损失
-            surr1 = ratios * advantages
-            surr2 = torch.clamp(ratios, 1 - self.clip_ratio, 1 + self.clip_ratio) * advantages
-            policy_loss = -torch.min(surr1, surr2).mean()
+            # 统一在动作维（最后一维）求和并展平成 [B]
+            # old_total_log_probs = old_total_log_probs.sum(dim=-1).view(-1)
+            # new_total_log_probs = new_total_log_probs.sum(dim=-1).view(-1)
+
+            # print(f"old_total_log_probs (after sum) shape: {old_total_log_probs.shape}")
+            # print(f"new_total_log_probs (after sum) shape: {new_total_log_probs.shape}")
+
+            # ratios = torch.exp(new_total_log_probs - old_total_log_probs)
+
+            ratios_c = torch.exp(new_continuous_log_probs - batch_continuous_log_probs)
+            ratios_d = torch.exp(new_discrete_log_probs - batch_discrete_log_probs)
+            #ratios_v = torch.exp() 感觉不太用吧
+
+            # 对于离散网络
+            surr1_d = ratios_d * advantages
+            surr2_d = torch.clamp(ratios_d,1 - self.clip_ratio,1 + self.clip_ratio) * advantages
+            discrete_loss = -torch.min(surr2_d,surr1_d).mean()
+
+            #对于连续网络
+            surr1_c = ratios_c * advantages
+            surr2_c = torch.clamp(ratios_d, 1 - self.clip_ratio, 1 + self.clip_ratio) * advantages
+            continuous_loss = -torch.min(surr2_c, surr1_c).mean()
+
+            # # PPO裁剪损失
+            # surr1 = ratios * advantages
+            # surr2 = torch.clamp(ratios, 1 - self.clip_ratio, 1 + self.clip_ratio) * advantages
+            # policy_loss = -torch.min(surr1, surr2).mean()
+            # #计算方法，首先是比率乘优势函数，比率是由新的策略产生的动作的概率除以旧的策略，得到对该动作的倾向
+            # #surr2是防止变化太大，设定一个变化范围
+
 
             # 价值损失
             value_loss = nn.MSELoss()(all_values, returns)
@@ -306,18 +345,46 @@ class HPPO:
             # 熵奖励（鼓励探索）
             discrete_entropy = torch.stack([dist.entropy().mean() for dist in all_discrete_dists]).mean()
             continuous_entropy = torch.stack([dist.entropy().mean() for dist in all_continuous_dists]).mean()
-            entropy_bonus = discrete_entropy + continuous_entropy
+
+            # entropy_bonus = discrete_entropy + continuous_entropy
 
             # 总损失
-            loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy_bonus
+            # loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy_bonus
+
+            # 离散损失
+            loss_d = discrete_loss +  self.value_coef * value_loss - self.entropy_coef * discrete_entropy
+
+            #连续损失
+            loss_c = continuous_loss +  self.value_coef * value_loss - self.entropy_coef * continuous_entropy
+
+            #由三部分组成，策略损失，价值损失，熵奖励
 
             # 反向传播和优化
-            self.optimizer.zero_grad()
-            loss.backward()
+            # self.optimizer.zero_grad()
+            # loss.backward()
+            # torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
+            # self.optimizer.step()
+
+            # 离散网络的反向传播和优化
+            self.optimizer_d.zero_grad()
+            loss_d.backward(retain_graph=True)
+            torch.nn.utils.clip_grad_norm_(self.policy.discrete_head.parameters(), max_norm=0.5)
+            self.optimizer_d.step()
+
+            # 连续网络反向传播和优化
+            self.optimizer_c.zero_grad()
+            loss_c.backward(retain_graph=True)
+            torch.nn.utils.clip_grad_norm_(self.policy.continuous.parameters(), max_norm=0.5)
+            self.optimizer_c.step()
+
+            # Critic网络更新
+            self.optimizer_v.zero_grad()
+            value_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
             self.optimizer.step()
 
-            total_loss += loss.item()
+            loss_discrete += loss_d.item()
+            loss_continuous += loss_c.item()
 
         # 清空缓冲区
         self._clear_buffer()
