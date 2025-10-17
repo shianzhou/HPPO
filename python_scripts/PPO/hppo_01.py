@@ -249,7 +249,7 @@ class HPPO:
 
     def learn(self):
         if len(self.states) < 32:  # 使用定义的batch_size
-            return 0
+            return 0,0
 
         # 计算优势函数和回报（当前实现正确，无需修改）
         advantages = self.calculate_advantages()
@@ -295,27 +295,8 @@ class HPPO:
             )  # [B, num_servos]
             all_values = torch.cat(all_values)
 
-            # print(f"batch_discrete_log_probs shape: {batch_discrete_log_probs.shape}")
-            # print(f"batch_continuous_log_probs shape: {batch_continuous_log_probs.shape}")
-            # print(f"new_discrete_log_probs shape: {new_discrete_log_probs.shape}")
-            # print(f"new_continuous_log_probs shape: {new_continuous_log_probs.shape}")
-            #
-            # # 统一在动作维（最后一维）求和并展平成 [B]
-            # old_total_log_probs = (batch_discrete_log_probs + batch_continuous_log_probs)
-            # print(f"old_total_log_probs (before sum) shape: {old_total_log_probs.shape}")
-            #
-            # # 计算新策略的总对数概率
-            # new_total_log_probs = (new_discrete_log_probs + new_continuous_log_probs)
-            # print(f"new_total_log_probs (before sum) shape: {new_total_log_probs.shape}")
-
-            # 统一在动作维（最后一维）求和并展平成 [B]
-            # old_total_log_probs = old_total_log_probs.sum(dim=-1).view(-1)
-            # new_total_log_probs = new_total_log_probs.sum(dim=-1).view(-1)
-
-            # print(f"old_total_log_probs (after sum) shape: {old_total_log_probs.shape}")
-            # print(f"new_total_log_probs (after sum) shape: {new_total_log_probs.shape}")
-
-            # ratios = torch.exp(new_total_log_probs - old_total_log_probs)
+            if advantages.dim() == 1:
+                advantages = advantages.unsqueeze(1)
 
             ratios_c = torch.exp(new_continuous_log_probs - batch_continuous_log_probs)
             ratios_d = torch.exp(new_discrete_log_probs - batch_discrete_log_probs)
@@ -324,12 +305,12 @@ class HPPO:
             # 对于离散网络
             surr1_d = ratios_d * advantages
             surr2_d = torch.clamp(ratios_d,1 - self.clip_ratio,1 + self.clip_ratio) * advantages
-            discrete_loss = -torch.min(surr2_d,surr1_d).mean()
+            discrete_loss = -torch.min(surr2_d,surr1_d).mean(dim=1).mean()
 
             #对于连续网络
             surr1_c = ratios_c * advantages
-            surr2_c = torch.clamp(ratios_d, 1 - self.clip_ratio, 1 + self.clip_ratio) * advantages
-            continuous_loss = -torch.min(surr2_c, surr1_c).mean()
+            surr2_c = torch.clamp(ratios_c, 1 - self.clip_ratio, 1 + self.clip_ratio) * advantages
+            continuous_loss = -torch.min(surr2_c, surr1_c).mean(dim=1).mean()
 
             # # PPO裁剪损失
             # surr1 = ratios * advantages
@@ -389,4 +370,4 @@ class HPPO:
         # 清空缓冲区
         self._clear_buffer()
 
-        return total_loss / self.policy_update_epochs
+        return loss_discrete / self.policy_update_epochs,loss_continuous / self.policy_update_epochs
