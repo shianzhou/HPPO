@@ -151,17 +151,15 @@ class HPPO:
             # log_prob = discrete_log_probs.cpu().numpy()
 
             discrete_action = discrete_dist.sample()  # 采样离散动作
-            # continuous_action = continuous_dist.sample()  # 采样连续参数
-            # continuous_action = torch.clamp(continuous_action,
-            #                                 min=-1.0,
-            #                                 max=1.0)
+
             #
             # # 重新计算裁剪后的对数概率
-            # continuous_log_prob = continuous_dist.log_prob(continuous_action)
+
             #
             # # 2. 计算已采样动作的对数概率
             # discrete_log_prob = discrete_dist.log_prob(discrete_action)
             # # continuous_log_prob = continuous_dist.log_prob(continuous_action)
+
             if discrete_action.dim() > 1:
                 discrete_action = discrete_action.squeeze(0)  # 移除批次维度
 
@@ -170,6 +168,9 @@ class HPPO:
             if continuous_action.dim() > 1:
                 continuous_action = continuous_action.squeeze(0)
 
+            continuous_action = torch.clamp(continuous_action,
+                                            min=-1.0,
+                                            max=1.0)
             # 计算对数概率
             discrete_log_prob = discrete_dist.log_prob(discrete_action)
             continuous_log_prob = continuous_dist.log_prob(continuous_action)
