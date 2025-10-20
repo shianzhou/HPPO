@@ -228,6 +228,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
         # 记录上一次实际发送到环境的动作（用于离散=0时保持不变）
         prev_shoulder_action = 0.0
         prev_arm_action = 0.0
+        prev_distance = None
         while True:
             # print(f'第{episode_num}周期，第{steps}步')
             ppo_state = [robot_state[1], robot_state[0], robot_state[5], robot_state[4]]  # 将机器人状态转换为ppo状态
@@ -325,17 +326,47 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             print(f'catch_flag: {catch_flag}')
             print(f'done: {done}')
             
-            if count == 1:  # 如果计数器为1 
-                gps1, gps2, gps3, gps4, foot_gps1 = env.print_gps()  # 获取GPS位置
-                x1 = gps_goal[0] - gps1[1]  # 计算目标位置与当前位置的差值
-                y1 = gps_goal[1] - gps1[2]
-                if x1 > -0.03 and y1 < 0.03:
-                    reward1 = 1  # 奖励为1
-                elif -0.05 < x1 < -0.03 and 0.03 < y1 < 0.05:
-                    reward1 = 1  # 奖励为1
-                else:
-                    reward1 = 0  # 奖励为0
-                reward = reward1  # 奖励为reward1
+            # if count == 1:  # 如果计数器为1
+            #     gps1, gps2, gps3, gps4, foot_gps1 = env.print_gps()  # 获取GPS位置
+            #     x1 = gps_goal[0] - gps1[1]  # 计算目标位置与当前位置的差值
+            #     y1 = gps_goal[1] - gps1[2]
+            #     if x1 > -0.03 and y1 < 0.03:
+            #         reward1 = 1  # 奖励为1
+            #     elif -0.05 < x1 < -0.03 and 0.03 < y1 < 0.05:
+            #         reward1 = 1  # 奖励为1
+            #     else:
+            #         reward1 = 0  # 奖励为0
+            #     reward = reward1  # 奖励为reward1
+
+            gps1, _, _, _, _ = env.print_gps()
+            # 安全检查：确保gps1有足够的元素
+            if len(gps1) < 3:
+                print(f"警告：gps1长度不足 ({len(gps1)} < 3)，使用默认值")
+                dx = 0.0
+                dy = 0.0
+            else:
+                dx = gps_goal[0] - gps1[1]
+                dy = gps_goal[1] - gps1[2]
+            current_distance = (dx ** 2 + dy ** 2) ** 0.5
+
+            # 距离变化奖励（鼓励靠近目标）
+            success_flag1 = env.darwin.get_touch_sensor_value('grasp_L1_2')
+            if prev_distance is not None:
+                distance_reward = (prev_distance - current_distance) * 15.0  # 增加距离奖励权重
+            else:
+                distance_reward = -current_distance  # 初始奖励
+
+            # 添加距离奖励：越接近目标奖励越高
+            proximity_reward = max(0, (0.5 - current_distance) * 5.0)  # 距离小于0.5时给额外奖励
+
+            # 组合奖励
+            reward = distance_reward + proximity_reward
+            prev_distance = current_distance  # 更新
+
+            # 稀疏奖励：到达目标附近额外加分
+            if success_flag1 == 1:
+                reward += 20.0  # 增加成功奖励
+
             return_all = return_all + reward  # 总奖励为当前奖励加上之前的总奖励
             steps += 1  # 步数加1
             next_obs_img, next_obs_tensor = env.get_img(steps, imgs)  # 获取下一个图像和图像张量
@@ -423,17 +454,17 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
                 # loss_arm = ppo_arm.learn(action_type='arm')
                 # # 学习离散HPPO
                 # loss_hppo = hppo_switch_catch.learn()
-                loss_hppo = hppo_agent.learn()
+                loss_d,loss_c = hppo_agent.learn()
 
-                loss =  loss_hppo
+                loss1,loss2 =  loss_d,loss_c
 
                 # print('loss_arm:', loss_arm)
                 # print('loss_shoulder:', loss_shoulder)
                 # print('loss_hppo:', loss_hppo)
-                print('loss:', loss)
+                print('loss_discrete:', loss1 ,'loss_continuous:',loss2)
                 
                 # 分别记录三个智能体的loss值
-                log_writer_catch.add_loss_hppo_catch(loss)
+                log_writer_catch.add_loss_hppo_catch(loss1,loss2)
                 # 立即落盘，避免仅在回合结束保存导致当轮loss缺失
                 try:
                     log_writer_catch.save_catch(log_file_latest_catch)
