@@ -30,10 +30,12 @@ class MultiDiscreteActorCritic(nn.Module):
         self.discrete_head = nn.Linear(200, num_servos*2)  # 输出num_servos个logit
 
         #连续动作头，输出值是已知所有动作的参数(输出维度因为所有需要参数的二倍)
-        self.continuous = nn.Linear(200,num_servos*2)
-
+        self.continuous =nn.Sequential(
+            nn.Linear(200, num_servos),
+            nn.Tanh()  # Tanh激活函数将mu的范围限制在[-1, 1]
+        )
         #且由于将sigma作为连续网络的输出值，所以不需要
-        #self.actor_log_sigma = nn.Parameter(torch.zeros(act_dim))
+        self.actor_log_sigma = nn.Parameter(torch.zeros(num_servos)* 0.1)
 
         # Critic头
         self.critic = nn.Linear(200, 1)
@@ -78,12 +80,16 @@ class MultiDiscreteActorCritic(nn.Module):
         discrete_logits = self.discrete_head(features)
         #
         # discrete_probs = torch.sigmoid(discrete_logits)  # [num_servos]
-        discrete_logits = discrete_logits.view(-1, self.num_servos, 2)  + 0.01 * torch.randn_like(discrete_logits) # 重塑为 [batch_size, num_servos, 3]
+        # 假设每个舵机有 2 种离散动作
+        discrete_logits = discrete_logits + 0.01 * torch.randn_like(discrete_logits)
+        discrete_logits = discrete_logits.view(-1, self.num_servos, 2)
+
         discrete_probs = F.softmax(discrete_logits, dim=-1)  # 在最后一个维度（动作维度）应用 softmax
         discrete_dist = Categorical(probs=discrete_probs)
         #将连续层的输出拆分为均值和方差
         continuous_output = self.continuous(features)
-        mu, log_sigma = torch.chunk(continuous_output, 2, dim=-1)  # 拆分
+        mu = continuous_output  # 拆分
+        log_sigma = self.actor_log_sigma.expand_as(mu)
         sigma = torch.exp(log_sigma)
 
         # 构建正态分布
@@ -363,7 +369,7 @@ class HPPO:
             self.optimizer_v.zero_grad()
             value_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
-            self.optimizer.step()
+            self.optimizer_v.step()
 
             loss_discrete += loss_d.item()
             loss_continuous += loss_c.item()
