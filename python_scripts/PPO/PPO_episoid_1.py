@@ -13,6 +13,74 @@ from python_scripts.PPO.hppo_01 import HPPO as hppo
 from python_scripts.Project_config import path_list, gps_goal, gps_goal1, device
 from python_scripts.PPO_Log_write import Log_write
 
+
+def calculate_distance(robot_pos, object_pos):
+    """
+    计算机器人末端（例如夹爪）和物体之间的欧氏距离。
+    假设 pos 是 [x, y] 或 [x, y, z] 格式的。
+    """
+    if not robot_pos or not object_pos:
+        return float('inf')
+    # 确保 positions 是 numpy 数组
+    robot_pos = np.array(robot_pos)
+    object_pos = np.array(object_pos)
+    squared_diff = (robot_pos - object_pos) ** 2
+    return np.sqrt(np.sum(squared_diff))
+
+
+def compute_catch_reward(env, steps, success_flag, goal_achieved, given_close_reward_flag, prev_distance):
+    """
+    抓取任务的综合奖励函数（包含过程奖励）
+    """
+    reward = -0.1  # 每步的基础惩罚
+    print(f"步骤 {steps}: 计算奖励...")  # 添加一些打印，方便调试
+
+    # --- 【新增】获取当前距离和计算过程奖励 ---
+    try:
+        # ... (你的过程奖励计算逻辑) ...
+        # 例如：
+        # robot_gripper_pos = ...
+        # object_pos = ...
+        # current_distance = calculate_distance(robot_gripper_pos, object_pos)
+
+        # 为了演示，我们用一个假想的逻辑
+        object_gps = [5.0, 0.0]  # 假设物体在 (5, 0) 位置
+        robot_gps = env.print_gps()
+        if robot_gps:  # 确保有gps数据
+            robot_gps_xy = np.array([robot_gps[1], robot_gps[2]])
+            current_distance = calculate_distance(robot_gps_xy, object_gps)
+
+            process_reward = 0.0
+            if prev_distance < float('inf') and current_distance < float('inf'):
+                distance_change = prev_distance - current_distance
+                process_reward = distance_change * 0.5
+                print(f"    -> 过程奖励: {process_reward:.4f} (距离从 {prev_distance:.4f} 变为 {current_distance:.4f})")
+
+            reward += process_reward
+            prev_distance = current_distance
+        else:
+            print("    -> [警告] 无法获取GPS，跳过过程奖励。")
+
+
+    except Exception as e:
+        print(f"    -> [警告] 过程奖励计算失败: {e}，将跳过。")
+        # 如果计算失败，prev_distance 保持不变
+
+    # ... (原有的成功/失败逻辑，保持不变) ...
+    if success_flag == 1:
+        reward += 50.0
+        return reward, True, prev_distance  # 新增返回 prev_distance
+
+    if goal_achieved and not given_close_reward_flag:
+        reward += 5.0
+        given_close_reward_flag = True
+        return reward, given_close_reward_flag, prev_distance  # 新增返回 prev_distance
+
+    # ... (Episode失败的逻辑) ...
+
+    # 修改所有返回值，都把 prev_distance 带上
+    return reward, given_close_reward_flag, prev_distance
+
 def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
 
     hppo_agent = hppo(num_servos=2,node_num=19,env_information=None)
@@ -211,7 +279,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
     env = Environment()
     success_catch = 0                  # 抓取成功次数
 
-    for i in range(episode_start, episode_start + 1000):  # 从episode_start开始，最多再训练10000个周期
+    for i in range(episode_start, episode_start + 5000):  # 从episode_start开始，最多再训练10000个周期
         log_writer_catch.add(episode_num=i)
         print(f"<<<<<<<<<第{i}周期") # 打印当前周期
         env.reset()
@@ -325,18 +393,6 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             prev_arm_action = masked_arm
             print(f'catch_flag: {catch_flag}')
             print(f'done: {done}')
-            
-            # if count == 1:  # 如果计数器为1
-            #     gps1, gps2, gps3, gps4, foot_gps1 = env.print_gps()  # 获取GPS位置
-            #     x1 = gps_goal[0] - gps1[1]  # 计算目标位置与当前位置的差值
-            #     y1 = gps_goal[1] - gps1[2]
-            #     if x1 > -0.03 and y1 < 0.03:
-            #         reward1 = 1  # 奖励为1
-            #     elif -0.05 < x1 < -0.03 and 0.03 < y1 < 0.05:
-            #         reward1 = 1  # 奖励为1
-            #     else:
-            #         reward1 = 0  # 奖励为0
-            #     reward = reward1  # 奖励为reward1
 
             gps1, _, _, _, _ = env.print_gps()
             # 安全检查：确保gps1有足够的元素
@@ -356,12 +412,22 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             else:
                 distance_reward = -current_distance  # 初始奖励
 
+                # 组合奖励
+                prev_distance = current_distance  # 更新
+
             # 添加距离奖励：越接近目标奖励越高
             proximity_reward = max(0, (0.5 - current_distance) * 5.0)  # 距离小于0.5时给额外奖励
 
-            # 组合奖励
-            reward = distance_reward + proximity_reward
-            prev_distance = current_distance  # 更新
+            #动作程度奖惩
+            action_magnitude = (abs(cur_shoulder) + abs(cur_arm)) / 2.0
+            inactivity_penalty = -0.2 if action_magnitude < 0.05 else 0.0
+            if int(d0) == 0 and int(d1) == 0:
+                inactivity_penalty += -0.3
+            large_action_penalty = -0.05 * (abs(cur_shoulder) > 0.9 or abs(cur_arm) > 0.9)
+
+            # --- 合并奖励 ---
+            reward = distance_reward + proximity_reward + inactivity_penalty + large_action_penalty - 0.5 * steps
+
 
             # 稀疏奖励：到达目标附近额外加分
             if success_flag1 == 1:
@@ -374,45 +440,6 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             # print('获取下一个状态更新完毕')
             # 可以修改reward值让其训练速度加快
             if good == 1:  # 如果good为1
-                # 将当前状态、动作、奖励、下一个状态、是否完成、是否达到目标添加到经验回放缓存中
-                #rpm.append((obs_img, robot_state, action, log_prob, reward, done, value))
-                # 同时将数据存储到PPO对象内部
-                # ppo_shoulder.store_transition_catch(
-                #     state=[obs_img, robot_state, robot_state],  # 包含图像、机器人状态和图神经网络输入
-                #     action_shoulder=action_shoulder,
-                #     action_arm=action_arm,
-                #     reward=reward,
-                #     next_state=[next_obs_img, next_state, next_state],  # 包含下一个图像、下一个状态和图神经网络输入
-                #     done=done,
-                #     value_shoulder=value_shoulder,
-                #     value_arm=value_arm,
-                #     log_prob_shoulder=log_prob_shoulder,
-                #     log_prob_arm=log_prob_arm
-                # )
-                # ppo_arm.store_transition_catch(
-                #     state=[obs_img, robot_state, robot_state],
-                #     action_shoulder=action_shoulder,
-                #     action_arm=action_arm,
-                #     reward=reward,
-                #     next_state=[next_obs_img, next_state, next_state],
-                #     done=done,
-                #     value_shoulder=value_shoulder,
-                #     value_arm=value_arm,
-                #     log_prob_shoulder=log_prob_shoulder,
-                #     log_prob_arm=log_prob_arm
-                # )
-                # # 存储离散HPPO轨迹
-                # hppo_switch_catch.store_transition(
-                #     state=[obs_img, robot_state, robot_state],
-                #     action=d_action,
-                #     reward=reward,
-                #     next_state=[next_obs_img, next_state, next_state],
-                #     done=done,
-                #     value=d_value,
-                #     log_prob=d_log_prob
-                # )
-                # self, state, discrete_action, continuous_action, reward, next_state, done, value,
-                # discrete_log_prob, continuous_log_prob
                 hppo_agent.store_transition(
                     state=[obs_img, robot_state, robot_state],
                     discrete_action=d_action,
