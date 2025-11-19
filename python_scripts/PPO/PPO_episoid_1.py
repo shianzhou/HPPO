@@ -431,7 +431,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
 
             # 稀疏奖励：到达目标附近额外加分
             if success_flag1 == 1:
-                reward += 20.0  # 增加成功奖励
+                reward += 20.   # 增加成功奖励
 
             return_all = return_all + reward  # 总奖励为当前奖励加上之前的总奖励
             steps += 1  # 步数加1

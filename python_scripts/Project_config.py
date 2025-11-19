@@ -16,35 +16,35 @@ MEMORY_CAPACITY = 100000
 
 # 路径配置
 path_list = {
-    'resetFlag': 'D:/project_MultiAgent/python_scripts/resetFlag.txt',
-    'resetFlag1': 'D:/project_MultiAgent/python_scripts/resetFlag1.txt',
-    'memory_graph': 'D:/project_MultiAgent/python_scripts/GNN/memory/memory_graph.pkl',
-    'photo_path_real': 'D:/project_MultiAgent/python_scripts',
-    'photo_path': 'D:/project_MultiAgent/python_scripts/photo',
+    'resetFlag': 'D:/project_MultiAgent_h/python_scripts/resetFlag.txt',
+    'resetFlag1': 'D:/project_MultiAgent_h/python_scripts/resetFlag1.txt',
+    'memory_graph': 'D:/project_MultiAgent_h/python_scripts/GNN/memory/memory_graph.pkl',
+    'photo_path_real': 'D:/project_MultiAgent_h/python_scripts',
+    'photo_path': 'D:/project_MultiAgent_h/python_scripts/photo',
      
     #DQN 
-    'model_path_catch_DQN': 'D:/project_MultiAgent/python_scripts/DQN/checkpoint/catch',
-    'model_path_tai_DQN': 'D:/project_MultiAgent/python_scripts/DQN/checkpoint/tai',
-    'shu_ju_path_DQN':'D:/project_MultiAgent/python_scripts/DQN/shu_ju.txt',
-    'gps_path_DQN':'D:/project_MultiAgent/python_scripts/DQN/gps.txt',
-    'catch_log_path_DQN':'D:/project_MultiAgent/python_scripts/DQN/log/catch_log/',
-    'tai_log_path_DQN':'D:/project_MultiAgent/python_scripts/DQN/log/tai_log/',
+    'model_path_catch_DQN': 'D:/project_MultiAgent_h/python_scripts/DQN/checkpoint/catch',
+    'model_path_tai_DQN': 'D:/project_MultiAgent_h/python_scripts/DQN/checkpoint/tai',
+    'shu_ju_path_DQN':'D:/project_MultiAgent_h/python_scripts/DQN/shu_ju.txt',
+    'gps_path_DQN':'D:/project_MultiAgent_h/python_scripts/DQN/gps.txt',
+    'catch_log_path_DQN':'D:/project_MultiAgent_h/python_scripts/DQN/log/catch_log/',
+    'tai_log_path_DQN':'D:/project_MultiAgent_h/python_scripts/DQN/log/tai_log/',
 
     #PPO
-    'model_path_catch_PPO': 'D:/project_MultiAgent/python_scripts/PPO/checkpoint/catch',
-    'model_path_tai_PPO': 'D:/project_MultiAgent/python_scripts/PPO/checkpoint/tai',
-    'shu_ju_path_PPO':'D:/project_MultiAgent/python_scripts/PPO/shu_ju.txt',
-    'gps_path_PPO':'D:/project_MultiAgent/python_scripts/PPO/gps.txt',
-    'catch_log_path_PPO':'D:/project_MultiAgent/python_scripts/PPO/log/catch_log/',
-    'tai_log_path_PPO':'D:/project_MultiAgent/python_scripts/PPO/log/tai_log/',
+    'model_path_catch_PPO': 'D:/project_MultiAgent_h/python_scripts/PPO/checkpoint/catch',
+    'model_path_tai_PPO': 'D:/project_MultiAgent_h/python_scripts/PPO/checkpoint/tai',
+    'shu_ju_path_PPO':'D:/project_MultiAgent_h/python_scripts/PPO/shu_ju.txt',
+    'gps_path_PPO':'D:/project_MultiAgent_h/python_scripts/PPO/gps.txt',
+    'catch_log_path_PPO':'D:/project_MultiAgent_h/python_scripts/PPO/log/catch_log/',
+    'tai_log_path_PPO':'D:/project_MultiAgent_h/python_scripts/PPO/log/tai_log/',
 
     #SAC
-    'model_path_catch_SAC': 'D:/project_MultiAgent/python_scripts/SAC/checkpoint/catch',
-    'model_path_tai_SAC': 'D:/project_MultiAgent/python_scripts/SAC/checkpoint/tai',
-    'shu_ju_path_SAC':'D:/project_MultiAgent/python_scripts/SAC/shu_ju.txt',
-    'gps_path_SAC':'D:/project_MultiAgent/python_scripts/SAC/gps.txt',
-    'catch_log_path_SAC':'D:/project_MultiAgent/python_scripts/SAC/log/catch_log/',
-    'tai_log_path_SAC':'D:/project_MultiAgent/python_scripts/SAC/log/tai_log/'
+    'model_path_catch_SAC': 'D:/project_MultiAgent_h/python_scripts/SAC/checkpoint/catch',
+    'model_path_tai_SAC': 'D:/project_MultiAgent_h/python_scripts/SAC/checkpoint/tai',
+    'shu_ju_path_SAC':'D:/project_MultiAgent_h/python_scripts/SAC/shu_ju.txt',
+    'gps_path_SAC':'D:/project_MultiAgent_h/python_scripts/SAC/gps.txt',
+    'catch_log_path_SAC':'D:/project_MultiAgent_h/python_scripts/SAC/log/catch_log/',
+    'tai_log_path_SAC':'D:/project_MultiAgent_h/python_scripts/SAC/log/tai_log/'
 
 }
 

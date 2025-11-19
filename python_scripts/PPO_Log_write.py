@@ -59,7 +59,9 @@ class Log_write:
             'loss_LegLower': [],  # 下腿智能体loss
             'loss_Ankle': [],     # 踝关节智能体loss
             'loss_hppo_tai': [],  # 抬腿阶段离散门控智能体loss
-            'loss_total_tai': []  # 抬腿阶段总loss
+            'loss_total_tai': [],  # 抬腿阶段总loss
+            'loss_discrete':[],
+            'loss_continuous':[]
         }
         # 注意：不再有 self.action_list 实例变量
 
@@ -313,14 +315,15 @@ class Log_write:
         # 将状态价值添加到最后一个序列中
         self.data['value_list_Ankle'][-1].append(float(value_item))
 
-    def add_loss_hppo_catch(self,loss):
-        if hasattr(loss, 'item') and callable(loss.item):
+    def add_loss_hppo_catch(self,loss1,loss2):
+        if hasattr(loss1, 'item') and hasattr(loss2,'item') and callable(loss1.item) and callable(loss2.item):
             try:
-                loss = loss.item()
+                loss1 = loss1.item()
+                loss2 = loss2.item()
             except Exception as e:
-                print(f"Warning: Could not call .item() on loss_hppo {loss}: {e}")
-        self.data['loss_hppo_01'].append(float(loss))
-
+                print(f"Warning: Could not call .item() on loss_hppo {loss1}or{loss2}: {e}")
+        self.data['loss_discrete'].append(float(loss1))
+        self.data['loss_continuous'].append(float(loss2))
 
     def add_loss_catch(self, loss_shoulder, loss_arm, loss_hppo, loss_total):
         """

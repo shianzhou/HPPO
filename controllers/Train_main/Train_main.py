@@ -1,7 +1,7 @@
 import sys
 import os
 # 添加项目路径到系统路径
-sys.path.append('D:\\project_MultiAgent')
+sys.path.append('D:\\project_MultiAgent_h')
 from python_scripts.DQN import DQN_episoid
 from python_scripts.PPO import PPO_episoid_1
 from python_scripts.SAC import SAC_episoid

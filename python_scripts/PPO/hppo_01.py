@@ -34,7 +34,7 @@ class MultiDiscreteActorCritic(nn.Module):
             nn.Linear(200, num_servos),
             nn.Tanh()  # Tanh激活函数将mu的范围限制在[-1, 1]
         )
-        #且由于将sigma作为连续网络的输出值，所以不需要
+
         self.actor_log_sigma = nn.Parameter(torch.zeros(num_servos)* 0.1)
 
         # Critic头
