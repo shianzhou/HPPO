@@ -325,6 +325,16 @@ class Log_write:
         self.data['loss_discrete'].append(float(loss1))
         self.data['loss_continuous'].append(float(loss2))
 
+    def add_loss_hppo_tai(self,loss1,loss2):
+        if hasattr(loss1, 'item') and hasattr(loss2,'item') and callable(loss1.item) and callable(loss2.item):
+            try:
+                loss1 = loss1.item()
+                loss2 = loss2.item()
+            except Exception as e:
+                print(f"Warning: Could not call .item() on loss_hppo {loss1}or{loss2}: {e}")
+        self.data['loss_discrete'].append(float(loss1))
+        self.data['loss_continuous'].append(float(loss2))
+
     def add_loss_catch(self, loss_shoulder, loss_arm, loss_hppo, loss_total):
         """
         记录抓取阶段三个智能体的loss值
