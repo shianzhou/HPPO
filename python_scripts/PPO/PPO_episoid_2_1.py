@@ -4,16 +4,14 @@ from python_scripts.Webots_interfaces import Environment
 from python_scripts.Project_config import path_list, BATCH_SIZE, LR, EPSILON, GAMMA, TARGET_REPLACE_ITER, MEMORY_CAPACITY, device, gps_goal, gps_goal1
 from python_scripts.PPO.PPO_PPOnet_2 import PPO2 
 from python_scripts.PPO.hppo import HPPO
+from python_scripts.PPO.hppo_01 import HPPO as hppo
 from python_scripts.PPO_Log_write import Log_write
 
-def PPO_tai_episoid(ppo2_LegUpper=None, ppo2_LegLower=None, ppo2_Ankle=None, existing_env=None ,total_episode=0, episode=0, log_writer_tai=None, log_file_latest_tai=None):
+def PPO_tai_episoid( existing_env=None ,total_episode=0, episode=0, log_writer_tai=None, log_file_latest_tai=None):
 
-    if ppo2_LegUpper is None:
-        ppo2_LegUpper = PPO2()
-    if ppo2_LegLower is None:
-        ppo2_LegLower = PPO2()
-    if ppo2_Ankle is None:
-        ppo2_Ankle = PPO2()
+    hppo_agent_tai= hppo(num_servos=3, node_num=19, env_information=None)
+
+
     # 使用已有的环境实例或创建新的
     if existing_env is not None:
         env = existing_env
@@ -52,22 +50,40 @@ def PPO_tai_episoid(ppo2_LegUpper=None, ppo2_LegLower=None, ppo2_Ankle=None, exi
         # 将机器人状态转换为PPO状态，与PPO_episoid_1.py保持一致
         ppo_state = [robot_state[1], robot_state[0], robot_state[5], robot_state[4]]
         # 选择动作
-        action_LegUpper, log_prob_LegUpper, value_LegUpper = ppo2_LegUpper.choose_action(episode_num=episode, 
-                                       obs=[obs_img, robot_state],
-                                       x_graph=robot_state)
-        action_LegLower, log_prob_LegLower, value_LegLower = ppo2_LegLower.choose_action(episode_num=episode, 
-                                       obs=[obs_img, robot_state],
-                                       x_graph=robot_state)
-        action_Ankle, log_prob_Ankle, value_Ankle = ppo2_Ankle.choose_action(episode_num=episode, 
-                                       obs=[obs_img, robot_state],
-                                       x_graph=robot_state)
-        # 离散开关
-        d_action, d_log_prob, d_value = hppo_switch_tai.choose_action(
-            episode_num=episode,
-            obs=[obs_img, robot_state],
-            x_graph=robot_state
-        )
+        dict = hppo_agent_tai.choose_action(episode_num=episode,
+                                        obs=[obs_img, robot_state],
+                                        x_graph=robot_state)
+
+        d_action = dict['discrete_action']
+
+        action_LegUpper = dict['continuous_action'][0]
+        action_LegLower = dict['continuous_action'][1]
+        action_Ankle = dict['continuous_action'][2]
+        log_prob_LegUpper = dict['continuous_log_prob'][0]
+        log_prob_LegLower = dict['continuous_log_prob'][1]
+        log_prob_Ankle = dict['continuous_log_prob'][2]
+        value = dict['value']
+
+
+        # ############################################################################################################
+        # action_LegUpper, log_prob_LegUpper, value_LegUpper = ppo2_LegUpper.choose_action(episode_num=episode,
+        #                                obs=[obs_img, robot_state],
+        #                                x_graph=robot_state)
+        # action_LegLower, log_prob_LegLower, value_LegLower = ppo2_LegLower.choose_action(episode_num=episode,
+        #                                obs=[obs_img, robot_state],
+        #                                x_graph=robot_state)
+        # action_Ankle, log_prob_Ankle, value_Ankle = ppo2_Ankle.choose_action(episode_num=episode,
+        #                                obs=[obs_img, robot_state],
+        #                                x_graph=robot_state)
+        # # 离散开关
+        # d_action, d_log_prob, d_value = hppo_switch_tai.choose_action(
+        #     episode_num=episode,
+        #     obs=[obs_img, robot_state],
+        #     x_graph=robot_state
+        # )
+        # ############################################################################################################
         dU, dL, dA = float(d_action[0]), float(d_action[1]), float(d_action[2])
+
         cur_U = float(action_LegUpper)
         cur_L = float(action_LegLower)
         cur_A = float(action_Ankle)
@@ -79,7 +95,7 @@ def PPO_tai_episoid(ppo2_LegUpper=None, ppo2_LegLower=None, ppo2_Ankle=None, exi
         # 分别添加动作、对数概率和状态价值到日志
         log_writer_tai.add_action_tai(action_LegUpper, action_LegLower, action_Ankle)
         log_writer_tai.add_log_prob_tai(log_prob_LegUpper, log_prob_LegLower, log_prob_Ankle)
-        log_writer_tai.add_value_tai(value_LegUpper, value_LegLower, value_Ankle)
+        log_writer_tai.add_value_tai(value, value, value)
 
         print("第", steps + 1, "步")
         print(f"{float(action_LegUpper):.4f}×{int(dU)}, {float(action_LegLower):.4f}×{int(dL)}, {float(action_Ankle):.4f}×{int(dA)}")
@@ -127,42 +143,54 @@ def PPO_tai_episoid(ppo2_LegUpper=None, ppo2_LegLower=None, ppo2_Ankle=None, exi
         if good == 1:
             #rpm_2.append((robot_state, action, reward, next_state, done))
             # 将数据存储到PPO2对象内部
-            ppo2_LegUpper.store_transition_tai(
+            # ppo2_LegUpper.store_transition_tai(
+            #     state=[obs_img, robot_state, robot_state],
+            #     actions=action_LegUpper,
+            #     rewards=reward,
+            #     next_state=[next_obs_img, robot_state, next_state],
+            #     done=done,
+            #     value=value_LegUpper,
+            #     log_prob=log_prob_LegUpper
+            # )
+            # ppo2_LegLower.store_transition_tai(
+            #     state=[obs_img, robot_state, robot_state],
+            #     actions=action_LegLower,
+            #     rewards=reward,
+            #     next_state=[next_obs_img, robot_state, next_state],
+            #     done=done,
+            #     value=value_LegLower,
+            #     log_prob=log_prob_LegLower
+            # )
+            # ppo2_Ankle.store_transition_tai(
+            #     state=[obs_img, robot_state, robot_state],
+            #     actions=action_Ankle,
+            #     rewards=reward,
+            #     next_state=[next_obs_img, robot_state, next_state],
+            #     done=done,
+            #     value=value_Ankle,
+            #     log_prob=log_prob_Ankle
+            # )
+            # # 存储离散HPPO
+            # hppo_switch_tai.store_transition(
+            #     state=[obs_img, robot_state, robot_state],
+            #     action=d_action,
+            #     reward=reward,
+            #     next_state=[next_obs_img, robot_state, next_state],
+            #     done=done,
+            #     value=d_value,
+            #     log_prob=d_log_prob
+            # )
+
+            hppo_agent_tai.store_transition(
                 state=[obs_img, robot_state, robot_state],
-                actions=action_LegUpper,
-                rewards=reward,
-                next_state=[next_obs_img, robot_state, next_state],
-                done=done,
-                value=value_LegUpper,
-                log_prob=log_prob_LegUpper
-            )
-            ppo2_LegLower.store_transition_tai(
-                state=[obs_img, robot_state, robot_state],
-                actions=action_LegLower,
-                rewards=reward,
-                next_state=[next_obs_img, robot_state, next_state],
-                done=done,
-                value=value_LegLower,
-                log_prob=log_prob_LegLower
-            )
-            ppo2_Ankle.store_transition_tai(
-                state=[obs_img, robot_state, robot_state],
-                actions=action_Ankle,
-                rewards=reward,
-                next_state=[next_obs_img, robot_state, next_state],
-                done=done,
-                value=value_Ankle,
-                log_prob=log_prob_Ankle
-            )
-            # 存储离散HPPO
-            hppo_switch_tai.store_transition(
-                state=[obs_img, robot_state, robot_state],
-                action=d_action,
+                discrete_action=d_action,
+                continuous_action=dict['continuous_action'],
                 reward=reward,
-                next_state=[next_obs_img, robot_state, next_state],
+                next_state=[next_obs_img, next_state, next_state],
                 done=done,
-                value=d_value,
-                log_prob=d_log_prob
+                value=value,
+                discrete_log_prob=dict['discrete_log_prob'],
+                continuous_log_prob=dict['continuous_log_prob']
             )
                         
         # 更新状态
@@ -177,17 +205,26 @@ def PPO_tai_episoid(ppo2_LegUpper=None, ppo2_LegLower=None, ppo2_Ankle=None, exi
         if episode % 200 == 0 and done == 1:
             save_path = path_list['model_path_tai_PPO'] + f"/ppo_model_tai_{total_episode}_{episode}.ckpt"
             print(f"保存模型到: {save_path}")
+            # checkpoint = {
+            #     "episode": episode,                      # 只写一次即可
+            #     # 上腿
+            #     "policy_LegUpper":    ppo2_LegUpper.policy.state_dict(),
+            #     "optimizer_LegUpper": ppo2_LegUpper.optimizer.state_dict(),
+            #     # 下腿
+            #     "policy_LegLower":    ppo2_LegLower.policy.state_dict(),
+            #     "optimizer_LegLower": ppo2_LegLower.optimizer.state_dict(),
+            #     # 踝关节
+            #     "policy_Ankle":       ppo2_Ankle.policy.state_dict(),
+            #     "optimizer_Ankle":    ppo2_Ankle.optimizer.state_dict(),
+            # }
+
             checkpoint = {
-                "episode": episode,                      # 只写一次即可
+                "episode": episode,  # 只写一次即可
                 # 上腿
-                "policy_LegUpper":    ppo2_LegUpper.policy.state_dict(),
-                "optimizer_LegUpper": ppo2_LegUpper.optimizer.state_dict(),
-                # 下腿
-                "policy_LegLower":    ppo2_LegLower.policy.state_dict(),
-                "optimizer_LegLower": ppo2_LegLower.optimizer.state_dict(),
-                # 踝关节
-                "policy_Ankle":       ppo2_Ankle.policy.state_dict(),
-                "optimizer_Ankle":    ppo2_Ankle.optimizer.state_dict(),
+                "policy_tai": hppo_agent_tai.policy.state_dict(),
+                "optimizer_c": hppo_agent_tai.optimizer_c.state_dict(),
+                "optimizer_d": hppo_agent_tai.optimizer_d.state_dict(),
+                "optimizer_v": hppo_agent_tai.optimizer_v.state_dict(),
             }
             torch.save(checkpoint, save_path)
         
@@ -211,18 +248,25 @@ def PPO_tai_episoid(ppo2_LegUpper=None, ppo2_LegLower=None, ppo2_Ankle=None, exi
             #     torch.save(checkpoint, save_path)
                 
             # 学习
-            loss_LegUpper = ppo2_LegUpper.learn()
-            print("loss_LegUpper:", loss_LegUpper)
-            loss_LegLower = ppo2_LegLower.learn()
-            print("loss_LegLower:", loss_LegLower)
-            loss_Ankle = ppo2_Ankle.learn()
-            print("loss_Ankle:", loss_Ankle)
-            loss_hppo = hppo_switch_tai.learn()
-            loss = loss_LegUpper + loss_LegLower + loss_Ankle + loss_hppo
+            # loss_LegUpper = ppo2_LegUpper.learn()
+            # print("loss_LegUpper:", loss_LegUpper)
+            # loss_LegLower = ppo2_LegLower.learn()
+            # print("loss_LegLower:", loss_LegLower)
+            # loss_Ankle = ppo2_Ankle.learn()
+            # print("loss_Ankle:", loss_Ankle)
+            # loss_hppo = hppo_switch_tai.learn()
+            # loss = loss_LegUpper + loss_LegLower + loss_Ankle + loss_hppo
+
+            loss_d, loss_c = hppo_agent_tai.learn()
+
+            loss1, loss2 = loss_d, loss_c
+            print('loss_discrete:', loss1, 'loss_continuous:', loss2)
             
             # 分别记录三个智能体的loss值
-            log_writer_tai.add_loss_tai(loss_LegUpper, loss_LegLower, loss_Ankle, loss_hppo, loss)
-                
+            #log_writer_tai.add_loss_tai(loss_LegUpper, loss_LegLower, loss_Ankle, loss_hppo, loss)
+            # need rewrite log mean
+
+            log_writer_tai.add_loss_hppo_tai(loss1,loss2)
             # 记录结果
             log_writer_tai.add(return_all=return_all)
             log_writer_tai.add(goal=goal)
