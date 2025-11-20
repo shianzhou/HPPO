@@ -14,72 +14,72 @@ from python_scripts.Project_config import path_list, gps_goal, gps_goal1, device
 from python_scripts.PPO_Log_write import Log_write
 
 
-def calculate_distance(robot_pos, object_pos):
-    """
-    计算机器人末端（例如夹爪）和物体之间的欧氏距离。
-    假设 pos 是 [x, y] 或 [x, y, z] 格式的。
-    """
-    if not robot_pos or not object_pos:
-        return float('inf')
-    # 确保 positions 是 numpy 数组
-    robot_pos = np.array(robot_pos)
-    object_pos = np.array(object_pos)
-    squared_diff = (robot_pos - object_pos) ** 2
-    return np.sqrt(np.sum(squared_diff))
-
-
-def compute_catch_reward(env, steps, success_flag, goal_achieved, given_close_reward_flag, prev_distance):
-    """
-    抓取任务的综合奖励函数（包含过程奖励）
-    """
-    reward = -0.1  # 每步的基础惩罚
-    print(f"步骤 {steps}: 计算奖励...")  # 添加一些打印，方便调试
-
-    # --- 【新增】获取当前距离和计算过程奖励 ---
-    try:
-        # ... (你的过程奖励计算逻辑) ...
-        # 例如：
-        # robot_gripper_pos = ...
-        # object_pos = ...
-        # current_distance = calculate_distance(robot_gripper_pos, object_pos)
-
-        # 为了演示，我们用一个假想的逻辑
-        object_gps = [5.0, 0.0]  # 假设物体在 (5, 0) 位置
-        robot_gps = env.print_gps()
-        if robot_gps:  # 确保有gps数据
-            robot_gps_xy = np.array([robot_gps[1], robot_gps[2]])
-            current_distance = calculate_distance(robot_gps_xy, object_gps)
-
-            process_reward = 0.0
-            if prev_distance < float('inf') and current_distance < float('inf'):
-                distance_change = prev_distance - current_distance
-                process_reward = distance_change * 0.5
-                print(f"    -> 过程奖励: {process_reward:.4f} (距离从 {prev_distance:.4f} 变为 {current_distance:.4f})")
-
-            reward += process_reward
-            prev_distance = current_distance
-        else:
-            print("    -> [警告] 无法获取GPS，跳过过程奖励。")
-
-
-    except Exception as e:
-        print(f"    -> [警告] 过程奖励计算失败: {e}，将跳过。")
-        # 如果计算失败，prev_distance 保持不变
-
-    # ... (原有的成功/失败逻辑，保持不变) ...
-    if success_flag == 1:
-        reward += 50.0
-        return reward, True, prev_distance  # 新增返回 prev_distance
-
-    if goal_achieved and not given_close_reward_flag:
-        reward += 5.0
-        given_close_reward_flag = True
-        return reward, given_close_reward_flag, prev_distance  # 新增返回 prev_distance
-
-    # ... (Episode失败的逻辑) ...
-
-    # 修改所有返回值，都把 prev_distance 带上
-    return reward, given_close_reward_flag, prev_distance
+# def calculate_distance(robot_pos, object_pos):
+#     """
+#     计算机器人末端（例如夹爪）和物体之间的欧氏距离。
+#     假设 pos 是 [x, y] 或 [x, y, z] 格式的。
+#     """
+#     if not robot_pos or not object_pos:
+#         return float('inf')
+#     # 确保 positions 是 numpy 数组
+#     robot_pos = np.array(robot_pos)
+#     object_pos = np.array(object_pos)
+#     squared_diff = (robot_pos - object_pos) ** 2
+#     return np.sqrt(np.sum(squared_diff))
+#
+#
+# def compute_catch_reward(env, steps, success_flag, goal_achieved, given_close_reward_flag, prev_distance):
+#     """
+#     抓取任务的综合奖励函数（包含过程奖励）
+#     """
+#     reward = -0.1  # 每步的基础惩罚
+#     print(f"步骤 {steps}: 计算奖励...")  # 添加一些打印，方便调试
+#
+#     # --- 【新增】获取当前距离和计算过程奖励 ---
+#     try:
+#         # ... (你的过程奖励计算逻辑) ...
+#         # 例如：
+#         # robot_gripper_pos = ...
+#         # object_pos = ...
+#         # current_distance = calculate_distance(robot_gripper_pos, object_pos)
+#
+#         # 为了演示，我们用一个假想的逻辑
+#         object_gps = [5.0, 0.0]  # 假设物体在 (5, 0) 位置
+#         robot_gps = env.print_gps()
+#         if robot_gps:  # 确保有gps数据
+#             robot_gps_xy = np.array([robot_gps[1], robot_gps[2]])
+#             current_distance = calculate_distance(robot_gps_xy, object_gps)
+#
+#             process_reward = 0.0
+#             if prev_distance < float('inf') and current_distance < float('inf'):
+#                 distance_change = prev_distance - current_distance
+#                 process_reward = distance_change * 0.5
+#                 print(f"    -> 过程奖励: {process_reward:.4f} (距离从 {prev_distance:.4f} 变为 {current_distance:.4f})")
+#
+#             reward += process_reward
+#             prev_distance = current_distance
+#         else:
+#             print("    -> [警告] 无法获取GPS，跳过过程奖励。")
+#
+#
+#     except Exception as e:
+#         print(f"    -> [警告] 过程奖励计算失败: {e}，将跳过。")
+#         # 如果计算失败，prev_distance 保持不变
+#
+#     # ... (原有的成功/失败逻辑，保持不变) ...
+#     if success_flag == 1:
+#         reward += 50.0
+#         return reward, True, prev_distance  # 新增返回 prev_distance
+#
+#     if goal_achieved and not given_close_reward_flag:
+#         reward += 5.0
+#         given_close_reward_flag = True
+#         return reward, given_close_reward_flag, prev_distance  # 新增返回 prev_distance
+#
+#     # ... (Episode失败的逻辑) ...
+#
+#     # 修改所有返回值，都把 prev_distance 带上
+#     return reward, given_close_reward_flag, prev_distance
 
 def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
 
@@ -541,7 +541,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             print("抓取成功，开始抬腿训练...")
             total_episode = i
             print("tai_episoid:", tai_episoid)
-            PPO_tai_episoid(ppo2_LegUpper=ppo2_LegUpper, ppo2_LegLower=ppo2_LegLower, ppo2_Ankle=ppo2_Ankle, existing_env=env, total_episode=total_episode, episode=tai_episoid, log_writer_tai=log_writer_tai, log_file_latest_tai=log_file_latest_tai)
+            PPO_tai_episoid(existing_env=env, total_episode=total_episode, episode=tai_episoid, log_writer_tai=log_writer_tai, log_file_latest_tai=log_file_latest_tai)
             tai_episoid += 1 
 
     
