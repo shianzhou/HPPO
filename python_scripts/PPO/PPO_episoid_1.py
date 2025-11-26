@@ -1,5 +1,6 @@
 # 测试
 import torch
+from collections import deque
 from python_scripts.PPO.PPO_PPOnet_2 import PPO2
 from python_scripts.PPO.PPO_PPOnet import PPO
 from python_scripts.PPO.hppo import HPPO
@@ -13,73 +14,84 @@ from python_scripts.PPO.hppo_01 import HPPO as hppo
 from python_scripts.Project_config import path_list, gps_goal, gps_goal1, device
 from python_scripts.PPO_Log_write import Log_write
 
+CAPTURE_STABILITY_WINDOW = 30
+CAPTURE_STABILITY_THRESHOLD = 0.7
+LEG_EPISODE_REPEAT_AFTER_SUCCESS = 3
+CHECKPOINT_INTERVAL = 100
+NUM_TEST_EPISODES_FOR_TEST = 20
+MAX_STEPS_PER_TEST_EPISODE = 400
 
-# def calculate_distance(robot_pos, object_pos):
-#     """
-#     计算机器人末端（例如夹爪）和物体之间的欧氏距离。
-#     假设 pos 是 [x, y] 或 [x, y, z] 格式的。
-#     """
-#     if not robot_pos or not object_pos:
-#         return float('inf')
-#     # 确保 positions 是 numpy 数组
-#     robot_pos = np.array(robot_pos)
-#     object_pos = np.array(object_pos)
-#     squared_diff = (robot_pos - object_pos) ** 2
-#     return np.sqrt(np.sum(squared_diff))
-#
-#
-# def compute_catch_reward(env, steps, success_flag, goal_achieved, given_close_reward_flag, prev_distance):
-#     """
-#     抓取任务的综合奖励函数（包含过程奖励）
-#     """
-#     reward = -0.1  # 每步的基础惩罚
-#     print(f"步骤 {steps}: 计算奖励...")  # 添加一些打印，方便调试
-#
-#     # --- 【新增】获取当前距离和计算过程奖励 ---
-#     try:
-#         # ... (你的过程奖励计算逻辑) ...
-#         # 例如：
-#         # robot_gripper_pos = ...
-#         # object_pos = ...
-#         # current_distance = calculate_distance(robot_gripper_pos, object_pos)
-#
-#         # 为了演示，我们用一个假想的逻辑
-#         object_gps = [5.0, 0.0]  # 假设物体在 (5, 0) 位置
-#         robot_gps = env.print_gps()
-#         if robot_gps:  # 确保有gps数据
-#             robot_gps_xy = np.array([robot_gps[1], robot_gps[2]])
-#             current_distance = calculate_distance(robot_gps_xy, object_gps)
-#
-#             process_reward = 0.0
-#             if prev_distance < float('inf') and current_distance < float('inf'):
-#                 distance_change = prev_distance - current_distance
-#                 process_reward = distance_change * 0.5
-#                 print(f"    -> 过程奖励: {process_reward:.4f} (距离从 {prev_distance:.4f} 变为 {current_distance:.4f})")
-#
-#             reward += process_reward
-#             prev_distance = current_distance
-#         else:
-#             print("    -> [警告] 无法获取GPS，跳过过程奖励。")
-#
-#
-#     except Exception as e:
-#         print(f"    -> [警告] 过程奖励计算失败: {e}，将跳过。")
-#         # 如果计算失败，prev_distance 保持不变
-#
-#     # ... (原有的成功/失败逻辑，保持不变) ...
-#     if success_flag == 1:
-#         reward += 50.0
-#         return reward, True, prev_distance  # 新增返回 prev_distance
-#
-#     if goal_achieved and not given_close_reward_flag:
-#         reward += 5.0
-#         given_close_reward_flag = True
-#         return reward, given_close_reward_flag, prev_distance  # 新增返回 prev_distance
-#
-#     # ... (Episode失败的逻辑) ...
-#
-#     # 修改所有返回值，都把 prev_distance 带上
-#     return reward, given_close_reward_flag, prev_distance
+def evaluate_capture_success_rate(agent, num_episodes=NUM_TEST_EPISODES_FOR_TEST, max_steps=MAX_STEPS_PER_TEST_EPISODE):
+    """在独立环境上测试当前抓取模型的成功率，返回成功率（比例）"""
+    eval_env = Environment()
+    was_training = agent.policy.training
+    agent.policy.eval()
+    success_count = 0
+    for _ in range(num_episodes):
+        eval_env.reset()
+        eval_env.wait(500)
+        imgs = []
+        steps = 0
+        prev_shoulder_action = 0.0
+        prev_arm_action = 0.0
+        obs_img, obs_tensor = eval_env.get_img(steps, imgs)
+        robot_state = eval_env.get_robot_state()
+        while steps < max_steps:
+            obs = (obs_tensor, robot_state)
+            action_dict = agent.choose_action(episode_num=0, obs=obs, x_graph=robot_state)
+            d_action = action_dict['discrete_action']
+            action_shoulder = action_dict['continuous_action'][0]
+            action_arm = action_dict['continuous_action'][1]
+            d0, d1 = float(d_action[0]), float(d_action[1])
+            cur_shoulder = float(action_shoulder.item())
+            cur_arm = float(action_arm.item())
+            masked_shoulder = prev_shoulder_action if int(d0) == 0 else cur_shoulder
+            masked_arm = prev_arm_action if int(d1) == 0 else cur_arm
+            gps1, gps2, gps3, gps4, _ = eval_env.print_gps()
+            catch_flag = 1.0 if steps >= 19 else 0.0
+            img_name = f"test_img_{steps}.png"
+            next_state, _, done, _, _, _ = eval_env.step(
+                robot_state,
+                masked_shoulder,
+                masked_arm,
+                steps,
+                catch_flag,
+                gps1,
+                gps2,
+                gps3,
+                gps4,
+                img_name
+            )
+            prev_shoulder_action = masked_shoulder
+            prev_arm_action = masked_arm
+            all_grasp_sensors = [
+                eval_env.darwin.get_touch_sensor_value('grasp_L1'),
+                eval_env.darwin.get_touch_sensor_value('grasp_L1_1'),
+                eval_env.darwin.get_touch_sensor_value('grasp_L1_2'),
+                eval_env.darwin.get_touch_sensor_value('grasp_R1'),
+                eval_env.darwin.get_touch_sensor_value('grasp_R1_1'),
+                eval_env.darwin.get_touch_sensor_value('grasp_R1_2')
+            ]
+            left_any = any(all_grasp_sensors[:3])
+            right_any = any(all_grasp_sensors[3:])
+            success_flag1 = 1 if (left_any and right_any) else 0
+            if success_flag1 == 1 or done == 1:
+                success_count += 1 if success_flag1 == 1 else 0
+                break
+            steps += 1
+            next_obs_img, next_obs_tensor = eval_env.get_img(steps, imgs)
+            obs_tensor = next_obs_tensor
+            robot_state = eval_env.get_robot_state()
+        eval_env.wait(100)
+    if was_training:
+        agent.policy.train()
+    return success_count / num_episodes if num_episodes else 0.0
+
+CAPTURE_STABILITY_WINDOW = 30
+CAPTURE_STABILITY_THRESHOLD = 0.7
+LEG_EPISODE_REPEAT_AFTER_SUCCESS = 3
+
+
 
 def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
 
@@ -98,6 +110,16 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
     # 初始化日志写入器
     log_writer_catch = Log_write()  # 创建抓取日志写入器
     log_writer_tai = Log_write()  # 创建抬腿日志写入器
+
+    capture_success_history = deque(maxlen=CAPTURE_STABILITY_WINDOW)
+    capture_test_records = []
+    best_capture_success_rate = 0.0
+    best_capture_checkpoint = ""
+
+    def is_capture_stable():
+        if len(capture_success_history) < CAPTURE_STABILITY_WINDOW:
+            return False
+        return sum(capture_success_history) / len(capture_success_history) >= CAPTURE_STABILITY_THRESHOLD
 
     tai_episoid = 1
     import os
@@ -139,8 +161,8 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
     else:
         # 没有现有日志文件，从1开始
         new_log_num = 1
-    log_file_latest_tai = os.path.join(path_list['tai_log_path_PPO'], f"tai_log_{new_log_num}.json")
-    print(f"将使用新抬腿的日志目录: {log_file_latest_tai}")
+    tai_log_next_index = new_log_num
+    print(f"将使用新抬腿日志起始编号: {tai_log_next_index}")
 
     # 加载模型
     # 抓取模型加载
@@ -280,6 +302,11 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
     success_catch = 0                  # 抓取成功次数
 
     for i in range(episode_start, episode_start + 5000):  # 从episode_start开始，最多再训练10000个周期
+        capture_ready_for_leg = is_capture_stable()
+        current_success_rate = (
+            sum(capture_success_history) / len(capture_success_history)
+            if capture_success_history else 0.0
+        )
         log_writer_catch.add(episode_num=i)
         print(f"<<<<<<<<<第{i}周期") # 打印当前周期
         env.reset()
@@ -428,10 +455,40 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             # --- 合并奖励 ---
             reward = distance_reward + proximity_reward + inactivity_penalty + large_action_penalty - 0.5 * steps
 
+            all_grasp_sensors = [
+                env.darwin.get_touch_sensor_value('grasp_L1'),
+                env.darwin.get_touch_sensor_value('grasp_L1_1'),
+                env.darwin.get_touch_sensor_value('grasp_L1_2'),
+                env.darwin.get_touch_sensor_value('grasp_R1'),
+                env.darwin.get_touch_sensor_value('grasp_R1_1'),
+                env.darwin.get_touch_sensor_value('grasp_R1_2')
+            ]
+            left_sensors = all_grasp_sensors[0:3]
+            right_sensors = all_grasp_sensors[3:6]
+            left_any = any(left_sensors)
+            right_any = any(right_sensors)
+            # 抓取成功：左右两侧都有传感器触发
+            success_flag1 = 1 if (left_any and right_any) else 0
 
-            # 稀疏奖励：到达目标附近额外加分
-            if success_flag1 == 1:
-                reward += 20.   # 增加成功奖励
+            if success_flag1 == 1:  # 抓到了
+                # 用你前面算好的 current_distance 即可
+                if current_distance <= 0.04:  # 4 cm 容忍
+                    reward += 30
+                    print("✅ 抓到目标梯级，发放大奖励！")
+                else:
+                    reward -= 15  # 抓错梯子，无大奖励
+                    print("⚠️  抓到非目标梯级，无大奖励")
+            if done == 1 and steps < 6 and success_flag1 != 1:
+                print("错误抓取！给予较大惩罚！")
+                reward -= 10
+            if done == 1 and steps >= 6 and success_flag1 != 1:
+                print("错误抓取！给予较大惩罚！")
+                reward -= 10
+            if done == 1 and steps <= 2 and success_flag1 != 1:
+                print("因环境不稳定导致无效数据，跳过此步骤！！！")
+                break
+            reward -= steps * 0.5
+            return_all = return_all + reward
 
             return_all = return_all + reward  # 总奖励为当前奖励加上之前的总奖励
             steps += 1  # 步数加1
@@ -498,21 +555,23 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
                 except Exception as _e:
                     print(f"保存抓取loss到日志失败: {_e}")
                
-                if i % 100 == 0 and i != 0:  # 每100步保存一次模型
-                    save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i  # 保存模型
-                    # checkpoint = {
-                    #     'policy_shoulder': ppo_shoulder.policy.state_dict(),
-                    #     'optimizer_shoulder': ppo_shoulder.optimizer.state_dict(),
-                    #     'policy_arm': ppo_arm.policy.state_dict(),
-                    #     'optimizer_arm': ppo_arm.optimizer.state_dict(),
-                    #     'episode': i
-                    # }
+                if i % CHECKPOINT_INTERVAL == 0 and i != 0:  # 每个检查点周期保存模型并评估
                     checkpoint = {
                         'policy': hppo_agent.policy.state_dict(),
                         'optimizer_hppo': hppo_agent.optimizer.state_dict(),
                         'episode': i
                     }
+                    save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i
                     torch.save(checkpoint, save_path)
+                    success_rate = evaluate_capture_success_rate(hppo_agent)
+                    log_writer_catch.add(test_success_rate=success_rate)
+                    capture_test_records.append((i, success_rate))
+                    print(f"周期 {i} 抓取阶段测试成功率: {success_rate:.2%}")
+                    if success_rate > best_capture_success_rate:
+                        best_capture_success_rate = success_rate
+                        best_capture_checkpoint = path_list['model_path_catch_PPO'] + f"/best_capture_{i}_{int(success_rate * 100):02d}.ckpt"
+                        torch.save(checkpoint, best_capture_checkpoint)
+                        print(f"  新的最佳模型 {best_capture_checkpoint}（{success_rate:.2%}）")
 
                 log_writer_catch.add(return_all=return_all)
                 # 写入目标
@@ -538,13 +597,30 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             success_catch += 1
             log_writer_catch.add(success_catch=success_catch)
             print("success_catch:", success_catch)
-            print("抓取成功，开始抬腿训练...")
             total_episode = i
-            print("tai_episoid:", tai_episoid)
-            PPO_tai_episoid(existing_env=env, total_episode=total_episode, episode=tai_episoid, log_writer_tai=log_writer_tai, log_file_latest_tai=log_file_latest_tai)
-            tai_episoid += 1 
+            if capture_ready_for_leg:
+                print(f"抓取稳定（最近 {len(capture_success_history)} 次 success rate={current_success_rate:.0%}），将进行 {LEG_EPISODE_REPEAT_AFTER_SUCCESS} 次抬腿训练")
+                for repeat in range(LEG_EPISODE_REPEAT_AFTER_SUCCESS):
+                    leg_log_file = os.path.join(path_list['tai_log_path_PPO'], f"tai_log_{tai_log_next_index}.json")
+                    tai_log_next_index += 1
+                    print(f"  抬腿训练第 {tai_episoid} 轮（重复 {repeat + 1}/{LEG_EPISODE_REPEAT_AFTER_SUCCESS}），日志: {leg_log_file}")
+                    log_writer_tai.clear()
+                    PPO_tai_episoid(
+                        existing_env=env,
+                        total_episode=total_episode,
+                        episode=tai_episoid,
+                        log_writer_tai=log_writer_tai,
+                        log_file_latest_tai=leg_log_file
+                    )
+                    tai_episoid += 1
+            else:
+                print(f"抬腿训练暂缓：当前抓取成功率 {current_success_rate:.0%} 低于 {CAPTURE_STABILITY_THRESHOLD:.0%}，继续抓取训练提升稳定性")
+        capture_success_history.append(1 if success_flag1 == 1 else 0)
 
     
+    if capture_test_records:
+        print(f"抓取阶段测试记录（周期, 成功率）: {capture_test_records}")
+        print(f"最佳测试成功率: {best_capture_success_rate:.2%}，模型: {best_capture_checkpoint}")
     log_writer_catch.save_catch(log_file_latest_catch)  # 保存日志
     # 如果整个训练过程结束，返回抓取成功状态和环境实例
     return False, env
