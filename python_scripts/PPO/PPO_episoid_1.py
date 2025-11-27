@@ -1,6 +1,5 @@
 # 测试
 import torch
-from collections import deque
 from python_scripts.PPO.PPO_PPOnet_2 import PPO2
 from python_scripts.PPO.PPO_PPOnet import PPO
 from python_scripts.PPO.hppo import HPPO
@@ -13,83 +12,6 @@ from python_scripts.PPO.hppo_01 import HPPO as hppo
 # from Data_fusion import data_fusion
 from python_scripts.Project_config import path_list, gps_goal, gps_goal1, device
 from python_scripts.PPO_Log_write import Log_write
-
-CAPTURE_STABILITY_WINDOW = 30
-CAPTURE_STABILITY_THRESHOLD = 0.7
-LEG_EPISODE_REPEAT_AFTER_SUCCESS = 3
-CHECKPOINT_INTERVAL = 100
-NUM_TEST_EPISODES_FOR_TEST = 20
-MAX_STEPS_PER_TEST_EPISODE = 400
-
-def evaluate_capture_success_rate(agent, num_episodes=NUM_TEST_EPISODES_FOR_TEST, max_steps=MAX_STEPS_PER_TEST_EPISODE):
-    """在独立环境上测试当前抓取模型的成功率，返回成功率（比例）"""
-    eval_env = Environment()
-    was_training = agent.policy.training
-    agent.policy.eval()
-    success_count = 0
-    for _ in range(num_episodes):
-        eval_env.reset()
-        eval_env.wait(500)
-        imgs = []
-        steps = 0
-        prev_shoulder_action = 0.0
-        prev_arm_action = 0.0
-        obs_img, obs_tensor = eval_env.get_img(steps, imgs)
-        robot_state = eval_env.get_robot_state()
-        while steps < max_steps:
-            obs = (obs_tensor, robot_state)
-            action_dict = agent.choose_action(episode_num=0, obs=obs, x_graph=robot_state)
-            d_action = action_dict['discrete_action']
-            action_shoulder = action_dict['continuous_action'][0]
-            action_arm = action_dict['continuous_action'][1]
-            d0, d1 = float(d_action[0]), float(d_action[1])
-            cur_shoulder = float(action_shoulder.item())
-            cur_arm = float(action_arm.item())
-            masked_shoulder = prev_shoulder_action if int(d0) == 0 else cur_shoulder
-            masked_arm = prev_arm_action if int(d1) == 0 else cur_arm
-            gps1, gps2, gps3, gps4, _ = eval_env.print_gps()
-            catch_flag = 1.0 if steps >= 19 else 0.0
-            img_name = f"test_img_{steps}.png"
-            next_state, _, done, _, _, _ = eval_env.step(
-                robot_state,
-                masked_shoulder,
-                masked_arm,
-                steps,
-                catch_flag,
-                gps1,
-                gps2,
-                gps3,
-                gps4,
-                img_name
-            )
-            prev_shoulder_action = masked_shoulder
-            prev_arm_action = masked_arm
-            all_grasp_sensors = [
-                eval_env.darwin.get_touch_sensor_value('grasp_L1'),
-                eval_env.darwin.get_touch_sensor_value('grasp_L1_1'),
-                eval_env.darwin.get_touch_sensor_value('grasp_L1_2'),
-                eval_env.darwin.get_touch_sensor_value('grasp_R1'),
-                eval_env.darwin.get_touch_sensor_value('grasp_R1_1'),
-                eval_env.darwin.get_touch_sensor_value('grasp_R1_2')
-            ]
-            left_any = any(all_grasp_sensors[:3])
-            right_any = any(all_grasp_sensors[3:])
-            success_flag1 = 1 if (left_any and right_any) else 0
-            if success_flag1 == 1 or done == 1:
-                success_count += 1 if success_flag1 == 1 else 0
-                break
-            steps += 1
-            next_obs_img, next_obs_tensor = eval_env.get_img(steps, imgs)
-            obs_tensor = next_obs_tensor
-            robot_state = eval_env.get_robot_state()
-        eval_env.wait(100)
-    if was_training:
-        agent.policy.train()
-    return success_count / num_episodes if num_episodes else 0.0
-
-CAPTURE_STABILITY_WINDOW = 30
-CAPTURE_STABILITY_THRESHOLD = 0.7
-LEG_EPISODE_REPEAT_AFTER_SUCCESS = 3
 
 
 
@@ -110,16 +32,6 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
     # 初始化日志写入器
     log_writer_catch = Log_write()  # 创建抓取日志写入器
     log_writer_tai = Log_write()  # 创建抬腿日志写入器
-
-    capture_success_history = deque(maxlen=CAPTURE_STABILITY_WINDOW)
-    capture_test_records = []
-    best_capture_success_rate = 0.0
-    best_capture_checkpoint = ""
-
-    def is_capture_stable():
-        if len(capture_success_history) < CAPTURE_STABILITY_WINDOW:
-            return False
-        return sum(capture_success_history) / len(capture_success_history) >= CAPTURE_STABILITY_THRESHOLD
 
     tai_episoid = 1
     import os
@@ -161,8 +73,8 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
     else:
         # 没有现有日志文件，从1开始
         new_log_num = 1
-    tai_log_next_index = new_log_num
-    print(f"将使用新抬腿日志起始编号: {tai_log_next_index}")
+    log_file_latest_tai = os.path.join(path_list['tai_log_path_PPO'], f"tai_log_{new_log_num}.json")
+    print(f"将使用新抬腿的日志目录: {log_file_latest_tai}")
 
     # 加载模型
     # 抓取模型加载
@@ -302,11 +214,6 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
     success_catch = 0                  # 抓取成功次数
 
     for i in range(episode_start, episode_start + 5000):  # 从episode_start开始，最多再训练10000个周期
-        capture_ready_for_leg = is_capture_stable()
-        current_success_rate = (
-            sum(capture_success_history) / len(capture_success_history)
-            if capture_success_history else 0.0
-        )
         log_writer_catch.add(episode_num=i)
         print(f"<<<<<<<<<第{i}周期") # 打印当前周期
         env.reset()
@@ -377,7 +284,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             masked_shoulder = prev_shoulder_action if int(d0) == 0 else cur_shoulder
             masked_arm = prev_arm_action if int(d1) == 0 else cur_arm
             print(f'第{i}周期，第{steps}步, 离散数值：({int(d0)},{int(d1)}), 连续: ({action_shoulder.item():.4f},{action_arm.item():.4f}), 实际: ({masked_shoulder:.4f},{masked_arm:.4f})')
-            
+
             # # 简化动作处理逻辑
             # if isinstance(a, tuple):
             #     # 如果是元组，取第一个元素作为动作
@@ -390,7 +297,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             #     action_value = action_value.cpu()
             # if hasattr(action_value, 'item'):
             #     action_value = action_value.item()
-                
+
             gps1, gps2, gps3, gps4, foot_gps1 = env.print_gps()  # 获取GPS位置
             if steps >= 19:  # 如果步数大于等于19
                 catch_flag = 1.0  # 抓取器状态为1.0
@@ -399,7 +306,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             img_name = "img" + str(steps) + ".png"  # 图像名称
             # print("action:", a)
             # 分别添加动作、对数概率和状态价值到日志
-            log_writer_catch.add_action_catch(action_shoulder, action_arm) 
+            log_writer_catch.add_action_catch(action_shoulder, action_arm)
             log_writer_catch.add_log_prob_catch(log_prob_shoulder, log_prob_arm)
             log_writer_catch.add_value_catch(value, value)
             # 执行一步动作
@@ -546,7 +453,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
                 # print('loss_shoulder:', loss_shoulder)
                 # print('loss_hppo:', loss_hppo)
                 print('loss_discrete:', loss1 ,'loss_continuous:',loss2)
-                
+
                 # 分别记录三个智能体的loss值
                 log_writer_catch.add_loss_hppo_catch(loss1,loss2)
                 # 立即落盘，避免仅在回合结束保存导致当轮loss缺失
@@ -554,29 +461,27 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
                     log_writer_catch.save_catch(log_file_latest_catch)
                 except Exception as _e:
                     print(f"保存抓取loss到日志失败: {_e}")
-               
-                if i % CHECKPOINT_INTERVAL == 0 and i != 0:  # 每个检查点周期保存模型并评估
+
+                if i % 100 == 0 and i != 0:  # 每100步保存一次模型
+                    save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i  # 保存模型
+                    # checkpoint = {
+                    #     'policy_shoulder': ppo_shoulder.policy.state_dict(),
+                    #     'optimizer_shoulder': ppo_shoulder.optimizer.state_dict(),
+                    #     'policy_arm': ppo_arm.policy.state_dict(),
+                    #     'optimizer_arm': ppo_arm.optimizer.state_dict(),
+                    #     'episode': i
+                    # }
                     checkpoint = {
                         'policy': hppo_agent.policy.state_dict(),
                         'optimizer_hppo': hppo_agent.optimizer.state_dict(),
                         'episode': i
                     }
-                    save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i
                     torch.save(checkpoint, save_path)
-                    success_rate = evaluate_capture_success_rate(hppo_agent)
-                    log_writer_catch.add(test_success_rate=success_rate)
-                    capture_test_records.append((i, success_rate))
-                    print(f"周期 {i} 抓取阶段测试成功率: {success_rate:.2%}")
-                    if success_rate > best_capture_success_rate:
-                        best_capture_success_rate = success_rate
-                        best_capture_checkpoint = path_list['model_path_catch_PPO'] + f"/best_capture_{i}_{int(success_rate * 100):02d}.ckpt"
-                        torch.save(checkpoint, best_capture_checkpoint)
-                        print(f"  新的最佳模型 {best_capture_checkpoint}（{success_rate:.2%}）")
 
                 log_writer_catch.add(return_all=return_all)
                 # 写入目标
                 log_writer_catch.add(goal=goal)
-                
+
             success_flag1 = env.darwin.get_touch_sensor_value('grasp_L1_2')
 
             if catch_flag == 1.0 or done == 1:  # 如果抓取器状态为1.0或完成
@@ -597,30 +502,13 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
             success_catch += 1
             log_writer_catch.add(success_catch=success_catch)
             print("success_catch:", success_catch)
+            print("抓取成功，开始抬腿训练...")
             total_episode = i
-            if capture_ready_for_leg:
-                print(f"抓取稳定（最近 {len(capture_success_history)} 次 success rate={current_success_rate:.0%}），将进行 {LEG_EPISODE_REPEAT_AFTER_SUCCESS} 次抬腿训练")
-                for repeat in range(LEG_EPISODE_REPEAT_AFTER_SUCCESS):
-                    leg_log_file = os.path.join(path_list['tai_log_path_PPO'], f"tai_log_{tai_log_next_index}.json")
-                    tai_log_next_index += 1
-                    print(f"  抬腿训练第 {tai_episoid} 轮（重复 {repeat + 1}/{LEG_EPISODE_REPEAT_AFTER_SUCCESS}），日志: {leg_log_file}")
-                    log_writer_tai.clear()
-                    PPO_tai_episoid(
-                        existing_env=env,
-                        total_episode=total_episode,
-                        episode=tai_episoid,
-                        log_writer_tai=log_writer_tai,
-                        log_file_latest_tai=leg_log_file
-                    )
-                    tai_episoid += 1
-            else:
-                print(f"抬腿训练暂缓：当前抓取成功率 {current_success_rate:.0%} 低于 {CAPTURE_STABILITY_THRESHOLD:.0%}，继续抓取训练提升稳定性")
-        capture_success_history.append(1 if success_flag1 == 1 else 0)
+            print("tai_episoid:", tai_episoid)
+            PPO_tai_episoid(existing_env=env, total_episode=total_episode, episode=tai_episoid, log_writer_tai=log_writer_tai, log_file_latest_tai=log_file_latest_tai)
+            tai_episoid += 1
 
-    
-    if capture_test_records:
-        print(f"抓取阶段测试记录（周期, 成功率）: {capture_test_records}")
-        print(f"最佳测试成功率: {best_capture_success_rate:.2%}，模型: {best_capture_checkpoint}")
+
     log_writer_catch.save_catch(log_file_latest_catch)  # 保存日志
     # 如果整个训练过程结束，返回抓取成功状态和环境实例
     return False, env
