@@ -8,7 +8,7 @@ from python_scripts.PPO.Replay_memory_2 import ReplayMemory_2
 from python_scripts.PPO.PPO_episoid_2_1 import PPO_tai_episoid
 from python_scripts.Webots_interfaces import Environment
 from python_scripts.PPO.hppo_01 import HPPO as hppo
-
+from python_scripts.PPO.hppo import HPPO as d_hppo
 # from Data_fusion import data_fusion
 from python_scripts.Project_config import path_list, gps_goal, gps_goal1, device
 from python_scripts.PPO_Log_write import Log_write
@@ -16,6 +16,7 @@ from python_scripts.PPO_Log_write import Log_write
 
 
 def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
+    decision_hppo_agent = d_hppo(num_servos=1,node_num=19,env_information=None)
 
     hppo_agent = hppo(num_servos=2,node_num=19,env_information=None)
 

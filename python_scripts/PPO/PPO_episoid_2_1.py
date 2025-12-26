@@ -65,23 +65,6 @@ def PPO_tai_episoid( existing_env=None ,total_episode=0, episode=0, log_writer_t
         value = dict['value']
 
 
-        # ############################################################################################################
-        # action_LegUpper, log_prob_LegUpper, value_LegUpper = ppo2_LegUpper.choose_action(episode_num=episode,
-        #                                obs=[obs_img, robot_state],
-        #                                x_graph=robot_state)
-        # action_LegLower, log_prob_LegLower, value_LegLower = ppo2_LegLower.choose_action(episode_num=episode,
-        #                                obs=[obs_img, robot_state],
-        #                                x_graph=robot_state)
-        # action_Ankle, log_prob_Ankle, value_Ankle = ppo2_Ankle.choose_action(episode_num=episode,
-        #                                obs=[obs_img, robot_state],
-        #                                x_graph=robot_state)
-        # # 离散开关
-        # d_action, d_log_prob, d_value = hppo_switch_tai.choose_action(
-        #     episode_num=episode,
-        #     obs=[obs_img, robot_state],
-        #     x_graph=robot_state
-        # )
-        # ############################################################################################################
         dU, dL, dA = float(d_action[0]), float(d_action[1]), float(d_action[2])
 
         cur_U = float(action_LegUpper)
@@ -205,18 +188,6 @@ def PPO_tai_episoid( existing_env=None ,total_episode=0, episode=0, log_writer_t
         if episode % 200 == 0 and done == 1:
             save_path = path_list['model_path_tai_PPO'] + f"/ppo_model_tai_{total_episode}_{episode}.ckpt"
             print(f"保存模型到: {save_path}")
-            # checkpoint = {
-            #     "episode": episode,                      # 只写一次即可
-            #     # 上腿
-            #     "policy_LegUpper":    ppo2_LegUpper.policy.state_dict(),
-            #     "optimizer_LegUpper": ppo2_LegUpper.optimizer.state_dict(),
-            #     # 下腿
-            #     "policy_LegLower":    ppo2_LegLower.policy.state_dict(),
-            #     "optimizer_LegLower": ppo2_LegLower.optimizer.state_dict(),
-            #     # 踝关节
-            #     "policy_Ankle":       ppo2_Ankle.policy.state_dict(),
-            #     "optimizer_Ankle":    ppo2_Ankle.optimizer.state_dict(),
-            # }
 
             checkpoint = {
                 "episode": episode,  # 只写一次即可
@@ -230,32 +201,7 @@ def PPO_tai_episoid( existing_env=None ,total_episode=0, episode=0, log_writer_t
         
         #学习过程
         if episode > 0 and done == 1:
-            # 如果达到目标，保存模型
-            # save_path = path_list['model_path_tai_PPO'] + f"/ppo_model_tai_{total_episode}_{episode}.ckpt"
-            # checkpoint = {
-            #         'policy': ppo2.policy.state_dict(),
-            #         'optimizer': ppo2.optimizer.state_dict(),
-            #         'episode': episode
-            #     }
-            # torch.save(checkpoint, save_path)
-            # if goal == 1:
-            #     save_path = path_list['model_path_tai_PPO'] + f"/ppo_model_tai_{total_episode}_{episode}.ckpt"
-            #     checkpoint = {
-            #         'policy': ppo2.policy.state_dict(),
-            #         'optimizer': ppo2.optimizer.state_dict(),
-            #         'episode': episode
-            #     }
-            #     torch.save(checkpoint, save_path)
-                
-            # 学习
-            # loss_LegUpper = ppo2_LegUpper.learn()
-            # print("loss_LegUpper:", loss_LegUpper)
-            # loss_LegLower = ppo2_LegLower.learn()
-            # print("loss_LegLower:", loss_LegLower)
-            # loss_Ankle = ppo2_Ankle.learn()
-            # print("loss_Ankle:", loss_Ankle)
-            # loss_hppo = hppo_switch_tai.learn()
-            # loss = loss_LegUpper + loss_LegLower + loss_Ankle + loss_hppo
+
 
             loss_d, loss_c = hppo_agent_tai.learn()
 
@@ -292,4 +238,4 @@ def PPO_tai_episoid( existing_env=None ,total_episode=0, episode=0, log_writer_t
             
             log_writer_tai.save_tai(log_file_latest_tai)
             break
-        
+    
