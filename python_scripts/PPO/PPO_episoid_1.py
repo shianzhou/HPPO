@@ -16,7 +16,7 @@ from python_scripts.PPO_Log_write import Log_write
 
 
 def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
-    decision_hppo_agent = d_hppo(num_servos=1,node_num=19,env_information=None)
+    # decision_hppo_agent = d_hppo(num_servos=1,node_num=19,env_information=None)
 
     hppo_agent = hppo(num_servos=2,node_num=19,env_information=None)
 
