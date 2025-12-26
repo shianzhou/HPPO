@@ -58,6 +58,7 @@ class RobotRun2:
        
         self.LegUpper = 1.09 * self.action_leg_upper + 0.59
         self.LegLower = 1.14 * self.action_leg_lower - 1.11
+
         self.Ankle = 1.305 * self.action_ankle - 0.085
         
 

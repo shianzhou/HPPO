@@ -60,8 +60,12 @@ class Log_write:
             'loss_Ankle': [],     # 踝关节智能体loss
             'loss_hppo_tai': [],  # 抬腿阶段离散门控智能体loss
             'loss_total_tai': [],  # 抬腿阶段总loss
+            #HPPO需要记录的值
             'loss_discrete':[],
-            'loss_continuous':[]
+            'loss_continuous':[],
+
+            'loss_discrete_tai': [],
+            'loss_continuous_tai': []
         }
         # 注意：不再有 self.action_list 实例变量
 

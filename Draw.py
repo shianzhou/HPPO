@@ -93,6 +93,15 @@ class MultiCurveChartApp:
             command=self.save_chart
         ).pack(side=tk.LEFT, padx=5)
 
+        # 增添趋势线
+        ttk.Combobox(
+            control_frame,
+            textvariable=self.trend_type,
+            values=["EMA", "Moving Average", "Polynomial", "Envelope Trend"],
+            state="readonly",
+            width=18
+        ).pack(side=tk.LEFT, padx=8)
+
         # 平滑功能控件
         ttk.Checkbutton(
             control_right,
@@ -149,11 +158,108 @@ class MultiCurveChartApp:
             command=self.remove_selected_file
         ).pack(side=tk.LEFT, padx=1)
 
+
         # 图表区域
         chart_frame = ttk.Frame(main_frame)
         chart_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.chart_frame = chart_frame
+
+    # def compute_avg(self):
+    #     """控制平滑参数控件的显示"""
+    #     y_avg = self.
+    #
+    #     return y_avg
+
+    def ema(self, data, alpha=0.1):
+        s = [data[0]]
+        for i in range(1, len(data)):
+            s.append(alpha * data[i] + (1 - alpha) * s[i - 1])
+        return s
+
+    def compute_function(self):
+
+
+        return
+    def make_trends(self):
+        import numpy as np
+
+        if not self.validate_entries():
+            return
+
+        x_key = self.x_axis_combobox.get().strip()
+        y_key = self.y_axis_combobox.get().strip()
+
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
+
+        lines_plotted = 0
+
+        for filename, data in self.file_data.items():
+
+            if y_key not in data:
+                continue
+
+            processed = self.process_file_data(filename, data, x_key, y_key)
+            if not processed:
+                continue
+
+            x_data, y_data = processed
+            if len(x_data) == 0 or len(y_data) == 0:
+                continue
+
+            # ---- 平滑曲线（可选） ----
+            if self.smooth_enabled.get():
+                y_data = self.apply_smoothing(y_data)
+
+            label = self.file_labels.get(filename, filename)
+            color = self.file_colors.get(filename, 'steelblue')
+
+            # ---- 先画原始曲线 ----
+            ax.plot(
+                x_data, y_data,
+                linestyle='-',
+                color=color,
+                linewidth=2,
+                label=label,
+                marker='.',
+                markersize=3,
+                alpha=0.9
+            )
+
+            # ---- 计算趋势线（线性回归）----
+            try:
+
+
+                y_trend = self.ema(y_data, alpha=0.1)
+
+                ax.plot(
+                    x_data, y_trend,
+                    linestyle='--',
+                    color='r',
+                    linewidth=2,
+                    alpha=0.5,
+                    label=f"{label} Trend"
+                )
+            except Exception as e:
+                print(f"Trend failed for {filename}: {e}")
+
+            lines_plotted += 1
+
+        # -------- 图表设置 --------
+        if lines_plotted > 0:
+            ax.set_title(f"HPPO - {y_key} (with Trend Lines)", fontsize=14)
+            ax.set_xlabel(x_key)
+            ax.set_ylabel(y_key)
+
+            ax.grid(True, linestyle='--', alpha=0.7)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.legend(loc='best')
+            self.figure.tight_layout()
+            self.canvas.draw()
+        else:
+            messagebox.showwarning("Warning", "No data to plot")
 
     def toggle_smooth_options(self):
         """控制平滑参数控件的显示"""
@@ -479,22 +585,20 @@ class MultiCurveChartApp:
                 x_data, y_data,
                 linestyle='-',
                 color=color,
-                linewidth=1,
+                linewidth=2,
                 label=line_label,
-                marker=None,
+                marker='.',
                 markersize=4,
                 alpha=0.8
             )
 
-            ax.set_yscale('log')
             lines_plotted += 1
-
 
         print(f"Total lines plotted: {lines_plotted}")
 
         if lines_plotted > 0:
             # 使用英文标题，去除空白字符
-            chart_title = f"Multi-File Data Comparison - {y_key}"
+            chart_title = f"HPPO - {y_key}"
             ax.set_title(chart_title, fontsize=14, pad=15)
             ax.legend(loc='best', frameon=True, fancybox=True, shadow=True)
 
