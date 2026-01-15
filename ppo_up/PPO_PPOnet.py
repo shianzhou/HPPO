@@ -1,0 +1,475 @@
+from collections import deque
+
+import torch
+import torch.nn as nn
+import numpy as np
+import torch_geometric
+from torch_geometric.data import Data
+from python_scripts.Project_config import device
+from torch.distributions import Normal
+
+class ActorCritic(nn.Module):
+    def __init__(self, act_dim, node_num):
+        super().__init__()
+        self.node_num = node_num
+        
+        # 保留原有的特征提取网络结构
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=(5, 5), stride=(2, 2), padding=1)
+        self.relu = nn.ReLU()
+        self.maxpool1 = nn.MaxPool2d(2, stride=2)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=(5, 5), stride=(2, 2))
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=(5, 5), stride=(2, 2), padding=1)
+        
+        self.fc0 = nn.Linear(in_features=6272, out_features=6000)
+        self.fc1 = nn.Linear(in_features=6000, out_features=100)
+        self.fc2 = nn.Linear(in_features=20, out_features=100)
+        self.fc3 = nn.Linear(in_features=100, out_features=100)
+        
+        # 图神经网络部分
+        self.conv_graph1 = torch_geometric.nn.GraphSAGE(1, 1000, 2, aggr='add')
+        self.conv_graph2 = torch_geometric.nn.GATConv(1000, 1000, aggr='add')
+        self.conv_graph3 = torch_geometric.nn.GraphSAGE(1000, 1000, 2, aggr='add')
+        self.conv_graph4 = torch_geometric.nn.GATConv(1000, 1000, aggr='add')
+        self.conv_graph5 = torch_geometric.nn.GCNConv(1000, 1000, 2, aggr='add')
+        self.fc_graph = nn.Linear(1000, 100)
+        
+        # 共享特征层
+        self.fc4 = nn.Linear(in_features=300, out_features=200)
+        
+        # --- 【核心修改 1】修改Actor头 ---
+        # Actor不再输出一个离散概率，而是输出一个分布的参数
+        # 1. mu_layer: 用于输出正态分布的均值(mu)
+        # 2. log_sigma_layer: 用于输出log(sigma)，以保证sigma为正
+        self.actor_mu = nn.Sequential(
+            nn.Linear(200, act_dim),
+            nn.Tanh()  # Tanh激活函数将mu的范围限制在[-1, 1]
+        )
+        
+        # 将log_sigma作为可学习的参数，而不是依赖于状态。这是一种常见且稳定的做法。
+        # act_dim 应该是动作的维度，这里是1
+        self.actor_log_sigma = nn.Parameter(torch.zeros(1))
+        self.exploration_factor = 1.0  # 可调探索系数，训练早期更大以增加噪声
+        
+        # Critic头：输出状态值
+        self.critic = nn.Linear(200, 1)
+    
+    # 保留原有的图处理函数
+    def create_edge_index(self):
+        ans = [
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+             17, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        ]
+        return torch.tensor(ans, dtype=torch.long)
+    
+    def creat_x(self, x_graph):
+        ans = [[] for i in range(self.node_num)]
+        for i in range(len(ans)):
+            ans[i] = [x_graph[i]]
+        return ans
+    
+    def creat_graph(self, x_graph):
+        x = torch.as_tensor(self.creat_x(x_graph), dtype=torch.float32)
+        edge_index = torch.as_tensor(self.create_edge_index(), dtype=torch.long)
+        graph = Data(x=x, edge_index=edge_index)
+        graph.x = graph.x.to(device)
+        graph.edge_index = graph.edge_index.to(device)
+        return graph
+
+    def forward(self, x, state, x_graph):
+        # 特征提取部分与原DQN相同
+        self.graph = self.creat_graph(x_graph)
+        x = torch.as_tensor(x, dtype=torch.float32).to(device)
+        x = torch.unsqueeze(x, dim=0)
+        #x = torch.unsqueeze(x, dim=1)
+        x = self.conv1(x)
+        x = self.relu(x)
+        x = self.conv2(x)
+        x = self.relu(x)
+        x = self.conv3(x)
+        x = x.view(x.size(0), -1)
+        x = torch.flatten(x)
+        x = self.fc0(x)
+        x = self.fc1(x)
+        
+        min_val1 = torch.min(x)
+        max_val1 = torch.max(x)
+        normalized_data1 = torch.div(torch.sub(x, min_val1), torch.sub(max_val1, min_val1))
+        #print(f"State shape: {state.shape if hasattr(state, 'shape') else 'N/A'}")
+        #print(f"State: {state}")
+        state = torch.as_tensor(state, dtype=torch.float32).to(device)
+        state = self.fc2(state)
+        state = self.fc3(state)
+        min_val2 = torch.min(state)
+        max_val2 = torch.max(state)
+        normalized_data2 = torch.div(torch.sub(state, min_val2), torch.sub(max_val2, min_val2))
+        
+        x_graph = self.creat_graph(x_graph)
+        edge_index = x_graph.edge_index
+        x_graph = self.conv_graph1(x_graph.x, edge_index)
+        x_graph = self.relu(x_graph)
+        x_graph = self.conv_graph2(x_graph, edge_index)
+        x_graph = self.relu(x_graph)
+        x_graph = self.conv_graph3(x_graph, edge_index)
+        x_graph = self.relu(x_graph)
+        x_graph = self.conv_graph4(x_graph, edge_index)
+        x_graph = self.relu(x_graph)
+        x_graph = self.conv_graph5(x_graph, edge_index)
+        x_graph = torch.mean(x_graph, dim=0)
+        x_graph = self.fc_graph(x_graph)
+        
+        min_val3 = torch.min(x_graph)
+        max_val3 = torch.max(x_graph)
+        normalized_x_graph = torch.div(torch.sub(x_graph, min_val3), torch.sub(max_val3, min_val3))
+        
+        state_x = torch.cat((normalized_data1, normalized_data2, normalized_x_graph), dim=-1)
+        features = self.fc4(state_x)
+        
+        # Actor: 输出均值 mu
+        mu = self.actor_mu(features)
+        
+        # 计算标准差 sigma
+        # 使用exp来保证sigma是正数。广播log_sigma以匹配mu的批次大小
+        log_sigma = self.actor_log_sigma.expand_as(mu)
+        sigma = torch.exp(log_sigma) * self.exploration_factor
+        
+        # 构建正态分布
+        dist = Normal(mu, sigma)
+        
+        # Critic: 输出状态值 (保持不变)
+        value = self.critic(features)
+        
+        return dist, value
+
+    def set_exploration_factor(self, factor):
+        # 防止过低导致完全无探索
+        self.exploration_factor = max(factor, 0.05)
+
+class PPO:
+    def __init__(self, node_num, env_information, act_dim=1):
+        self.node_num = node_num
+        self.env_information = env_information
+        self.act_dim = act_dim
+        # PPO超参数
+        self.gamma = 0.99  # 折扣因子
+        self.gae_lambda = 0.95  # GAE参数
+        self.clip_ratio = 0.1  # PPO裁剪参数
+        self.value_coef = 0.5  # 值函数损失系数
+        self.entropy_coef = 0.1  # 增加熵系数，提高探索
+        self.max_grad_norm = 1.0  # 梯度裁剪阈值
+
+        # 学习率和优化器参数
+        self.lr = 3e-4  # 提高学习率
+        self.lr_decay = 0.999  # 减缓学习率衰减
+
+        # PPO更新参数
+        self.update_epochs = 4  # 【优化】减少更新次数，防止过度拟合
+        self.batch_size = 64  # 批大小
+
+        # 初始化策略网络
+        self.policy = ActorCritic(act_dim=self.act_dim, node_num=self.node_num).to(device)
+
+        # 使用Adam优化器
+        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.lr)
+
+        # 学习率调度器
+        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=self.lr_decay)
+        
+        # 存储轨迹数据
+        self.states = []
+        self.actions = []          # 存储 tanh 后的动作（用于环境执行）
+        self.actions_raw = []      # 存储原始动作（用于正确计算 log_prob）
+        self.rewards = []
+        self.next_states = []
+        self.values = []           # 合并存储价值
+        self.log_probs = []       # 合并存储对数概率
+        self.dones = []
+    
+    def choose_action(self, episode_num, obs, x_graph, explore=None):
+        if isinstance(obs, tuple):
+            x = obs[0]
+            state = obs[1]
+        else:
+            x = obs
+            state = x_graph
+
+        if isinstance(x, torch.Tensor):
+            x = x.to(device)
+
+        # 动态调节探索强度：sigma_factor 会随训练逐渐减小
+        sigma_factor = self._get_exploration_factor(episode_num)
+        self.policy.set_exploration_factor(sigma_factor)
+
+        epsilon = max(0.1, 0.90 - episode_num * 0.0001)
+        if explore is not None:
+            use_random = explore
+        else:
+            random_num = np.random.uniform()
+            use_random = random_num < epsilon
+            
+        with torch.no_grad():
+            # 关键修改：不再使用 action_type 来区分生成逻辑
+            # 直接从 policy 网络获得分布
+            dist, value = self.policy(x, state, x_graph)
+            
+            # 探索或利用的逻辑现在基于 self.act_dim
+            if use_random:
+                # 探索：根据智能体的动作维度生成随机动作
+                action_scaled = torch.tensor(np.random.uniform(-1, 1, size=self.act_dim), dtype=torch.float32).to(device)
+                # 对于随机动作，需要从分布中采样一个 action_raw 来计算 log_prob
+                # 但为了简化，我们使用一个近似：从分布中采样，然后 tanh
+                action_raw = dist.sample()
+                action_scaled = torch.tanh(action_raw)
+            else:
+                # 利用：从策略网络生成的分布中采样
+                action_raw = dist.sample()
+                action_scaled = torch.tanh(action_raw)
+            
+            # 【关键修复】正确计算 log_prob：需要减去 tanh 的雅可比修正项
+            # log_prob = dist.log_prob(action_raw) - log(1 - tanh²(action_raw))
+            # 这是 tanh squashing 的标准修正公式
+            log_prob_raw = dist.log_prob(action_raw)
+            # 计算 tanh 的雅可比行列式修正项：log(1 - tanh²(x))
+            tanh_correction = torch.log(1 - action_scaled.pow(2) + 1e-6)  # 添加小值防止 log(0)
+            log_prob = (log_prob_raw - tanh_correction).sum(dim=-1)
+
+            # 返回一个标量动作、一个标量概率、一个标量价值、原始动作
+            # 注意：即使 self.act_dim > 1，这里也直接返回张量，由调用者处理
+            # 但你的情况是 act_dim=1, 所以返回的就是一个标量张量
+            return action_scaled.cpu().numpy(), log_prob.item(), value.item(), action_raw.cpu().numpy()
+
+    def store_transition_catch(self, state, action, reward, next_state, done, value, log_prob, action_raw=None):
+        """
+        --- 【修改 3】简化存储接口 ---
+        每个智能体只存储自己的数据。
+        
+        参数:
+            action: tanh 后的动作（用于环境执行）
+            action_raw: 原始动作（用于正确计算 log_prob），如果为 None 则从 action 反推
+        """
+        self.states.append(state)
+        self.actions.append(action)
+        # 如果提供了 action_raw，存储它；否则尝试从 action 反推（但这不是最优的）
+        if action_raw is not None:
+            self.actions_raw.append(action_raw)
+        else:
+            # 尝试从 tanh 后的动作反推原始动作（用于兼容性）
+            # 注意：这不是最优方法，但为了向后兼容
+            action_tensor = torch.tensor(action, dtype=torch.float32).to(device)
+            action_raw_approx = torch.atanh(torch.clamp(action_tensor, -0.9999, 0.9999))
+            self.actions_raw.append(action_raw_approx.cpu().item())
+        self.rewards.append(reward)
+        self.next_states.append(next_state)
+        self.values.append(value)
+        self.log_probs.append(log_prob)
+        self.dones.append(done)
+    
+    def calculate_advantages(self):
+        """
+        计算优势函数和回报
+        
+        :param action_type: 'shoulder' 或 'arm'，指定计算哪个动作的优势函数
+        """
+        if not self.rewards:          # 没有数据直接返回空
+            return np.array([]), np.array([])
+
+        # if action_type == 'shoulder':
+        #     values = np.array(self.values_shoulder)
+        # elif action_type == 'arm':
+        #     values = np.array(self.values_arm)
+        # else:
+        #     raise ValueError("action_type 必须是 'shoulder' 或 'arm'")
+        
+        # 将rewards和values转换为numpy数组以便处理
+        if len(self.values) != len(self.rewards):
+            print(f"警告: self.values 长度 ({len(self.values)}) 和 self.rewards 长度 ({len(self.rewards)}) 不匹配！这可能表明数据存储逻辑有误。")
+            # 可以选择报错，或者截断到较短的那个长度（不推荐）
+            # 这里选择报错，让开发者定位问题
+            raise ValueError("Critical Error: self.values and self.rewards have different lengths.")
+
+        values = np.array(self.values) 
+        rewards = np.array(self.rewards)
+        dones = np.array(self.dones)
+
+        # 计算GAE优势函数
+        advantages = np.zeros_like(rewards)
+        last_advantage = 0
+
+        # 从后向前计算优势函数
+        for t in reversed(range(len(rewards))):
+            if t == len(rewards) - 1:
+                # 对于最后一个时间步，使用0作为下一个值的估计
+                next_value = 0 if dones[t] else values[t]
+            else:
+                next_value = values[t + 1]
+
+            delta = rewards[t] + self.gamma * next_value * (1 - dones[t]) - values[t]
+            advantages[t] = delta + self.gamma * self.gae_lambda * (1 - dones[t]) * last_advantage
+            last_advantage = advantages[t]
+
+        # 计算回报
+        returns = advantages + values
+
+        # 标准化优势函数
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        return advantages, returns
+
+    def get_current_sigma(self):
+        base_sigma = torch.exp(self.policy.actor_log_sigma).item()
+        return base_sigma * getattr(self.policy, "exploration_factor", 1.0)
+
+    def _get_exploration_factor(self, episode_num):
+        """
+        线性衰减探索强度：前期保留较大噪声，后期逐渐收敛
+        """
+        start_factor = 1.5
+        end_factor = 0.2
+        decay_episode = 4000
+        progress = min(max(episode_num, 0) / decay_episode, 1.0)
+        return start_factor + (end_factor - start_factor) * progress
+    def learn(self):
+        """
+        根据指定的动作类型（'shoulder' 或 'arm'）更新策略网络。
+  
+        :param action_type: 一个字符串，'shoulder' 或 'arm'，用于指定要更新哪个动作部分。
+        """
+        # 检查传入的参数是否合法
+        #if action_type not in ['shoulder', 'arm']:
+        #    raise ValueError("action_type 必须是 'shoulder' 或 'arm'")
+        
+        # 计算优势函数和回报
+        advantages, returns = self.calculate_advantages()
+        if len(advantages) == 0:
+            return 0.0
+
+        # 将数据转换为张量
+        batch_states = self.states
+        batch_advantages = torch.tensor(advantages, dtype=torch.float32).to(device)
+        batch_returns = torch.tensor(returns, dtype=torch.float32).to(device)
+         # 根据 action_type 选择相应的动作和对数概率
+        batch_actions = torch.tensor(self.actions, dtype=torch.float32).to(device)
+        batch_log_probs = torch.tensor(self.log_probs, dtype=torch.float32).to(device)
+        # 确保 actions_raw 列表存在
+        if len(self.actions_raw) != len(self.actions):
+            # 如果长度不匹配，从 actions 反推（向后兼容）
+            self.actions_raw = [torch.atanh(torch.clamp(torch.tensor(a), -0.9999, 0.9999)).item() 
+                               for a in self.actions]     # 多次更新网络
+        total_loss = 0
+        for _ in range(self.update_epochs):
+            # 生成随机索引
+            indices = torch.randperm(len(batch_states))
+
+            # 分批处理数据
+            for start_idx in range(0, len(batch_states), self.batch_size):
+                batch_indices = indices[start_idx:start_idx + self.batch_size]
+                
+                batch_x, batch_state, batch_x_graph = [], [], []
+                for idx in batch_indices:
+                    if idx < len(batch_states):
+                        batch_x.append(batch_states[idx][0])
+                        batch_state.append(batch_states[idx][1])
+                        batch_x_graph.append(batch_states[idx][2])
+                        
+                if not batch_x:
+                    continue
+
+                # --- 【核心修改】这里只计算一次前向传播 ---
+                # 不再有 if/else 区分，因为一个 PPO 实例只负责一个智能体
+                # dist_batch_values 将是一个列表，包含每个样本的 (distribution, value) 元组
+                dist_batch_values = [self.policy(x, s, g) for x, s, g in zip(batch_x, batch_state, batch_x_graph)]
+                
+                # 提取分布和值
+                # dists 是一个 Normal 分布对象的列表
+                # values 是一个 value tensor 的列表
+                dists = [dv[0] for dv in dist_batch_values]
+                values = torch.cat([dv[1].unsqueeze(0) for dv in dist_batch_values]) # 保证values是一个 batch tensor
+
+                # 为整个批次构建一个大的分布对象，方便计算概率
+                # 注意:如果你的 network 输出的是一个batch的分布，那就更简单了
+                # 但你目前的 network 是对每个样本单独计算的，所以这里需要手动拼接
+                # mu_batch = torch.cat([d.mean for d in dists])
+                # sigma_batch = torch.cat([d.stddev for d in dists])
+                # dist_for_loss = torch.distributions.Normal(mu_batch, sigma_batch)
+                
+                # 更简单的做法是直接在循环里计算每个样本的loss
+                # 这样对于batch size小的情况不会太慢
+                
+                # 获取当前批次的动作、对数概率、优势、回报等
+                batch_actions_curr = batch_actions[batch_indices]
+                batch_log_probs_curr = batch_log_probs[batch_indices]
+                batch_advantages_curr = batch_advantages[batch_indices]
+                batch_returns_curr = batch_returns[batch_indices]
+                
+                # --- 【核心修改】计算新的对数概率和熵 ---
+                # 【关键修复】需要获取原始动作（action_raw）来计算正确的 log_prob
+                batch_actions_raw = torch.tensor([self.actions_raw[int(idx)] for idx in batch_indices], 
+                                                  dtype=torch.float32).to(device)
+                
+                policy_loss = 0
+                entropy = 0
+                # 遍历批次中的每一个样本
+                for i in range(len(batch_x)):
+                    # 【关键修复】使用 action_raw 计算 log_prob，然后应用 tanh squashing 修正
+                    # 处理维度：确保 action_raw_i 是正确的形状
+                    action_raw_i = batch_actions_raw[i]
+                    if action_raw_i.dim() == 0:  # 标量
+                        action_raw_i = action_raw_i.unsqueeze(0)
+                    elif action_raw_i.dim() == 1 and action_raw_i.shape[0] == 1:
+                        pass  # 已经是正确的形状 [1]
+                    else:
+                        action_raw_i = action_raw_i.unsqueeze(-1) if action_raw_i.dim() == 0 else action_raw_i
+                    
+                    # 计算原始分布的对数概率
+                    new_log_prob_raw = dists[i].log_prob(action_raw_i)
+                    
+                    # 计算 tanh 后的动作（用于修正项）
+                    action_tanh_i = torch.tanh(action_raw_i)
+                    # 应用 tanh squashing 修正：log(1 - tanh²(x))
+                    tanh_correction = torch.log(1 - action_tanh_i.pow(2) + 1e-6)
+                    new_log_prob = (new_log_prob_raw - tanh_correction).sum(dim=-1)
+                    
+                    ratio = torch.exp(new_log_prob - batch_log_probs_curr[i])
+                    
+                    surr1 = ratio * batch_advantages_curr[i]
+                    surr2 = torch.clamp(ratio, 1 - self.clip_ratio, 1 + self.clip_ratio) * batch_advantages_curr[i]
+                    
+                    policy_loss += -torch.min(surr1, surr2) # 注意这里不带 mean
+                    entropy += dists[i].entropy() # 注意这里不带 mean
+
+                policy_loss = policy_loss / len(batch_x) # 最后再取平均
+                entropy = entropy / len(batch_x) # 最后再取平均
+
+
+                # 值函数损失 (这个保持不变)
+                value_loss = nn.MSELoss()(values, batch_returns_curr)
+
+                # 总损失 (这个保持不变)
+                loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy
+
+                # 优化步骤 (保持不变)
+                self.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                self.optimizer.step()
+                
+                total_loss += loss.item()
+
+        # 更新学习率
+        self.scheduler.step()
+
+        # 清空轨迹数据
+        self.states.clear()
+        self.actions.clear()
+        self.actions_raw.clear()
+        self.rewards.clear()
+        self.next_states.clear()
+        self.dones.clear()
+        self.values.clear()
+        self.log_probs.clear()
+        # 清理GPU内存
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        print("total_loss:", total_loss)
+        return total_loss / self.update_epochs
