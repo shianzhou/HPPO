@@ -27,7 +27,7 @@ from pathlib import Path
 # from utils.plots import Annotator, colors, save_one_box
 # from utils.torch_utils import select_device, smart_inference_mode
 # import torch
-# from python_scripts.Project_config import path_list, gps_goal
+from python_scripts.Project_config import path_list, gps_goal
 # # 将上级的上级目录（Train_main）添加到路径
 # sys.path.append(str(Path(__file__).parent.parent))
 from python_scripts.Webots_interfaces import Darwin
@@ -36,6 +36,7 @@ from python_scripts.Project_config import Darwin_config
 
 
 class RobotRun(Darwin):
+    
     # 控制机器人按照action行动的类
     # action:
     def __init__(self, robot, state, action_shouder, action_arm, step, catch_flag, gps1, gps2, gps3, gps4, img_name):
@@ -43,10 +44,7 @@ class RobotRun(Darwin):
         self.img_name = img_name    # 名称
         self.step = step    # 步数
         self.robot_state = state  # 机器人状态
-        self.gps1 = gps1
-        self.gps2 = gps2
-        self.gps3 = gps3
-        self.gps4 = gps4
+        
         self.gps = [gps1, gps2, gps3, gps4]  # GPS坐标数值列表  
         #GPS设备通常返回一个包含3个值的列表/元组，表示3D空间中的坐标[x, y, z]。
         self.action_shouder = action_shouder  # 动作
@@ -113,6 +111,7 @@ class RobotRun(Darwin):
                                 'count' :0} # 标识符列表 reward, done, good, goal, count
 
     def run(self):
+
         self.robot.step(32)  # 机器人步长
         acc = self.accelerometer.getValues()  # 加速度传感器值
         gyro = self.gyro.getValues()  # 陀螺仪值
@@ -125,6 +124,7 @@ class RobotRun(Darwin):
         y2 = Darwin_config.gps_goal[0] - self.gps[2][1]  # 高度 目标位置y2与当前位置y2的差值
         z1 = Darwin_config.gps_goal[1] - self.gps[1][2]  # 前进 目标位置z1与当前位置z1的差值
         z2 = Darwin_config.gps_goal[1] - self.gps[2][2]  # 前进 目标位置z2与当前位置z2的差值
+
         reward1 = 20 - 200 * math.sqrt((y1 * y1) + (z1 * z1))  # 奖励1
         reward2 = 20 - 200 * math.sqrt((y2 * y2) + (z2 * z2))  # 奖励2
         tan1 = y1 / z1  # 角度1正切值
@@ -155,6 +155,7 @@ class RobotRun(Darwin):
             reward4 = -20  # 奖励4= -20
         self.return_flag_list.update({'count':1})
         # 遍历未来状态
+
         for i in range(len(self.future_state)): 
             if Darwin_config.limit[1][0] <= self.future_state[i] <= Darwin_config.limit[1][1]:    # 角度1在限制范围内
                 continue
@@ -172,21 +173,25 @@ class RobotRun(Darwin):
         self.robot.step(32)  # 机器人步长
         # self.robot.step(32)  # 机器人步长
         # self.robot.step(32)  # 机器人步长
-        if_exist = 1  # 初始化存在标识符为1    
-        if if_exist == 1:    # 如果存在标识符为1
-            pass
-        # 存在标识符不为1
-        else:
-            self.return_flag_list.update({'reward':0, 'count':0, 'done':1, 'good':0})
-            # 返回下一个状态，奖励，完成，好，目标，计数
-            print('存在标识符不为1,catch_flag: 0,done:1------------->388')
-            return self.next_state, \
-                   self.return_flag_list['reward'], \
-                   self.return_flag_list['done'], \
-                   self.return_flag_list['good'], \
-                   self.return_flag_list['goal'], \
-                   self.return_flag_list['count']
+
+        #疑似历史遗留问题，之前应该是用过yolo，后面不用了，与后面注释掉的yolo识别是对应的
+        # if_exist = 1  # 初始化存在标识符为1    
+        # if if_exist == 1:    # 如果存在标识符为1
+        #     pass
+        # # 存在标识符不为1
+        # else:
+        #     self.return_flag_list.update({'reward':0, 'count':0, 'done':1, 'good':0})
+        #     # 返回下一个状态，奖励，完成，好，目标，计数
+        #     print('存在标识符不为1,catch_flag: 0,done:1------------->388')
+        #     return self.next_state, \
+        #            self.return_flag_list['reward'], \
+        #            self.return_flag_list['done'], \
+        #            self.return_flag_list['good'], \
+        #            self.return_flag_list['goal'], \
+        #            self.return_flag_list['count']
         # 遍历加速度传感器
+
+        
         for i in range(3):
             # 加速度传感器值在限制范围内
             if Darwin_config.acc_low[i] < acc[i] < Darwin_config.acc_high[i] and \
@@ -667,11 +672,11 @@ class RobotRun(Darwin):
 #     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
 #     return opt
 
-# def main(opt):
-#     check_requirements(exclude=('tensorboard', 'thop'))
-#     if_exist = run(**vars(opt))
-#     sys.exit()
-#     return if_exist
+def main(opt):
+    check_requirements(exclude=('tensorboard', 'thop'))
+    if_exist = run(**vars(opt))
+    sys.exit()
+    return if_exist
 
 
 # #上面是在使用yolo，得到结果
