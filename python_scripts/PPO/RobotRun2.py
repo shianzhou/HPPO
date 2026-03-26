@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # 将ROOT添加到PATH
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # 相对路径
 import torch
+from python_scripts.Project_config import gps_goal1
 
 class RobotRun2:
     """
@@ -42,7 +43,7 @@ class RobotRun2:
         self.robot = robot
         self.timestep = 32  # 仿真时间步长
         self.step = step  # 当前步数
-        self.goal = [0.058, 0.0225]  # 目标位置
+        self.goal = gps_goal1  # 目标位置
         self.biao_zhun = -32.64359902756043  # 标准参考值
         self.robot_state = state  # 当前机器人状态
         # 存储GPS数据
@@ -58,7 +59,6 @@ class RobotRun2:
        
         self.LegUpper = 1.09 * self.action_leg_upper + 0.59
         self.LegLower = 1.14 * self.action_leg_lower - 1.11
-
         self.Ankle = 1.305 * self.action_ankle - 0.085
         
 
@@ -178,21 +178,13 @@ class RobotRun2:
         goal = 0  # 是否达到目标
         reward = 0  # 奖励值
         reward1 = math.sqrt((x1 * x1) + (y1 * y1))  # 计算欧几里得距离作为基础奖励
-
         count = 1  # 计数器，用于控制奖励计算
         
-        # 检查关节角度是否在限制范围内
-        for i in range(len(self.future_state)):
-            if self.limit[1][0] <= self.future_state[i] <= self.limit[1][1]:
-                continue
-            else:
-                # 如果超出限制，返回零奖励并结束回合
-                reward = 0
-                count = 0
-                done = 1
-                good = 1
-                return self.next_state, reward, done, good, goal, count
-                
+        # 应用关节角度限制，确保动作在安全范围内
+        self.future_state[11] = max(self.limit[11][0], min(self.limit[11][1], self.future_state[11]))
+        self.future_state[13] = max(self.limit[13][0], min(self.limit[13][1], self.future_state[13]))
+        self.future_state[15] = max(self.limit[15][0], min(self.limit[15][1], self.future_state[15]))
+        
         # 执行多个仿真步
         self.robot.step(32)
         self.robot.step(32)
@@ -204,6 +196,7 @@ class RobotRun2:
             pass
         else:
             # 如果环境状态异常，返回零奖励并结束回合
+            print("环境状态异常，返回零奖励并结束回合")
             reward = 0
             count = 0
             done = 1
@@ -216,21 +209,17 @@ class RobotRun2:
                 continue
             else:
                 # 如果传感器数据异常，返回零奖励并结束回合
+                print("传感器数据异常，返回零奖励并结束回合")
                 reward = 0
                 count = 0
                 done = 1
                 good = 0
                 return self.next_state, reward, done, good, goal, count
 
-        # 应用已有的关节角度限制
-        leg_upper_pos = max(self.limit[11][0], min(self.limit[11][1], self.next[0]))
-        leg_lower_pos = max(self.limit[13][0], min(self.limit[13][1], self.next[1]))
-        ankle_pos = max(self.limit[15][0], min(self.limit[15][1], self.next[2]))
-        
         # 设置限制后的关节角度
-        self.motors[11].setPosition(leg_upper_pos)  # 设置左腿上部位置
-        self.motors[13].setPosition(leg_lower_pos)  # 设置左腿下部位置
-        self.motors[15].setPosition(ankle_pos)  # 设置左脚踝位置
+        self.motors[11].setPosition(self.future_state[11])  # 设置左腿上部位置
+        self.motors[13].setPosition(self.future_state[13])  # 设置左腿下部位置
+        self.motors[15].setPosition(self.future_state[15])  # 设置左脚踝位置
         
         # 等待动作执行完成
         self.robot.step(32)
@@ -244,15 +233,15 @@ class RobotRun2:
         
         # 初始化返回值
         done = 0
-        reward = reward1  # 使用距离作为奖励
+        reward = -reward1  # 距离越小奖励越大
         good = 1
         
         # 检查是否发生碰撞
         for m in range(6):
             if self.touch_peng[m].getValue() == 1.0:
-                # 如果发生碰撞，返回零奖励并结束回合
-                done = 1
-                reward = 0
+                # 如果发生碰撞，返回负奖励
+                done = 0
+                reward = -10.0
                 good = 1
                 count = 0
                 return self.next_state, reward, done, good, goal, count
@@ -279,44 +268,35 @@ class RobotRun2:
                 self.touch_value[j] = self.touch[j].getValue()
                 
             # 根据距离和触摸状态决定奖励和回合结束条件
-            if reward1 >= 0.1:
-                # 如果距离较远，给予较小奖励
-                reward = 0
-                goal = 0
-                count = 1
-                done = 1
-                good = 1
-            elif self.touch_value[0] == 1 or self.touch_value[1] == 1:
-                # 如果脚部成功接触到梯子，给予大奖励
-                reward = 100
+            if (self.touch_value[0] == 1 or self.touch_value[1] == 1 or self.touch_value[2] == 1):
+                reward = 50
                 goal = 1
-                count = 0
+                count = 1
                 done = 1
                 good = 1
                 return self.next_state, reward, done, good, goal, count
             else:
-                # 其他情况，给予中等奖励
-                reward = 20
+                reward = -2.0
                 goal = 0
-                count = 0
+                count = 1
                 done = 1
                 good = 1
 
         # 获取当前关节角度并检查是否达到目标位置
-        for i in range(20):
-            self.next_state[i] = self.motors_sensors[i].getValue()  # 获取当前关节角度
-            self.cha_zhi = self.next_state[i] - self.future_state[i]  # 计算与目标角度的差值
-            if -0.01 < self.cha_zhi < 0.01:
-                # 如果差值很小，认为已达到目标位置
-                continue
-            else:
-                # 如果差值较大，认为未达到目标位置
-                count = 1
-                reward = 0
-                done = 1
-                goal = 0
-                good = 1
-                break
+        # for i in range(20):
+        #     self.next_state[i] = self.motors_sensors[i].getValue()  # 获取当前关节角度
+        #     self.cha_zhi = self.next_state[i] - self.future_state[i]  # 计算与目标角度的差值
+        #     if -0.01 < self.cha_zhi < 0.01:
+        #         # 如果差值很小，认为已达到目标位置
+        #         continue
+        #     else:
+        #         # 如果差值较大，认为未达到目标位置
+        #         count = 1
+        #         reward = 0
+        #         done = 0
+        #         goal = 0
+        #         good = 1
+        #         break
                 
         # 返回结果
         return self.next_state, reward, done, good, goal, count

@@ -1,0 +1,39 @@
+{
+    "start time": "2026-03-26 16:02:59",
+    "save time": [
+        "2026-03-26 16:03:07",
+        "2026-03-26 16:03:09",
+        "2026-03-26 16:03:10",
+        "2026-03-26 16:03:13",
+        "2026-03-26 16:03:15",
+        "2026-03-26 16:03:18"
+    ],
+    "episode_num": [5],
+    "shoulder_actions": [],
+    "arm_actions": [],
+    "log_prob_list": [
+        []
+    ],
+    "value_list": [
+        []
+    ],
+    "loss_shoulder": [],
+    "loss_arm": [],
+    "loss_hppo": [],
+    "loss_hppo_01": [],
+    "loss_total": [],
+    "loss_LegUpper": [],
+    "loss_LegLower": [],
+    "loss_Ankle": [],
+    "loss_hppo_tai": [],
+    "loss_total_tai": [],
+    "loss_discrete": [],
+    "loss_continuous": [],
+    "loss_discrete_tai": [],
+    "loss_continuous_tai": [],
+    "decision": [0, 0, 0, 0, 0, 1],
+    "decision_reward": [5.0, 5.0, 5.0, -15.0, -15.0, -10.0],
+    "catch_success": [0, 0, 0, 1, 1, 0],
+    "decision_value": [1.1372188329696655, 2.474821090698242, 2.245619297027588, 2.237783193588257, 2.3583765029907227, 2.240126609802246],
+    "decision_loss": [0]
+}

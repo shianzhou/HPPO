@@ -20,6 +20,61 @@ import os
 import glob
 import re
 
+
+# ===== 方案A: 训练管理器（同步三个模型的更新频率） =====
+class TrainingManager:
+    """
+    统一管理三个模型（抓取、抬腿、决策）的训练节奏，防止梯度聚集和模型冲突。
+    核心思想：不同模型以不同频率进行学习，避免同时大量参数更新。
+    """
+    def __init__(self):
+        self.catch_episodes = 0      # 抓取episodes计数
+        self.tai_episodes = 0        # 抬腿episodes计数
+        self.decision_episodes = 0   # 决策episodes计数
+        
+        # 【关键参数】控制各模型的学习频率
+        self.catch_learn_interval = 3    # 每3个抓取episodes学习一次（抓取最频繁）
+        self.tai_learn_interval = 2      # 每2个抬腿episodes学习一次（中等频率）
+        self.decision_learn_interval = 5 # 每5个决策episodes学习一次（最稀疏）
+        
+        print("【训练管理器初始化】")
+        print(f"  抓取学习间隔: {self.catch_learn_interval}个episodes")
+        print(f"  抬腿学习间隔: {self.tai_learn_interval}个episodes")
+        print(f"  决策学习间隔: {self.decision_learn_interval}个episodes")
+    
+    def should_learn_catch(self) -> bool:
+        """决定是否让抓取模型学习（降低频率防止梯度聚集）"""
+        result = (self.catch_episodes % self.catch_learn_interval == 0) and (self.catch_episodes > 0)
+        return result
+    
+    def should_learn_tai(self) -> bool:
+        """决定是否让抬腿模型学习（更新频率较低，批量大）"""
+        result = (self.tai_episodes % self.tai_learn_interval == 0) and (self.tai_episodes > 0)
+        return result
+    
+    def should_learn_decision(self) -> bool:
+        """决定是否让决策模型学习（最稀疏的更新）"""
+        result = (self.decision_episodes % self.decision_learn_interval == 0) and (self.decision_episodes > 0)
+        return result
+    
+    def increment_catch(self):
+        """抓取episode计数加1"""
+        self.catch_episodes += 1
+    
+    def increment_tai(self):
+        """抬腿episode计数加1"""
+        self.tai_episodes += 1
+    
+    def increment_decision(self):
+        """决策episode计数加1"""
+        self.decision_episodes += 1
+    
+    def get_status(self) -> str:
+        """获取当前训练状态"""
+        return (f"[TrainingManager] Catch:{self.catch_episodes} | "
+                f"Tai:{self.tai_episodes} | Decision:{self.decision_episodes}")
+
+
 def _ensure_dir(path: str) -> None:
     try:
         os.makedirs(path, exist_ok=True)
@@ -161,6 +216,9 @@ def load_decision_model(decision_agent, dec_dir: Optional[str]) -> int:
 
 
 def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
+    # ===== 训练管理器初始化（方案A核心） =====
+    training_manager = TrainingManager()
+    
     # ===== 智能体实例化（统一放置） =====
     hppo_agent = hppo(num_servos=2, node_num=19, env_information=None)          # 抓取阶段智能体
     tai_agent = hppo(num_servos=3, node_num=19, env_information=None)       # 抬腿阶段智能体（复用）
@@ -439,17 +497,18 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                         # loss_arm = ppo_arm.learn(action_type='arm')
                         # # 学习离散HPPO
                         # loss_hppo = hppo_switch_catch.learn()
-                        loss_d, loss_c = hppo_agent.learn()
-
-                        loss1, loss2 = loss_d, loss_c
-
-                        # print('loss_arm:', loss_arm)
-                        # print('loss_shoulder:', loss_shoulder)
-                        # print('loss_hppo:', loss_hppo)
-                        print('loss_discrete:', loss1, 'loss_continuous:', loss2)
                         
-                        # 分别记录三个智能体的loss值
-                        log_writer_catch.add_loss_hppo_catch(loss1, loss2)
+                        # 【方案A】使用训练管理器控制学习频率
+                        training_manager.increment_catch()
+                        if training_manager.should_learn_catch():
+                            loss_d, loss_c = hppo_agent.learn()
+                            loss1, loss2 = loss_d, loss_c
+                            print(f'【抓取模型学习】{training_manager.get_status()} | loss_discrete: {loss1:.6f}, loss_continuous: {loss2:.6f}')
+                            log_writer_catch.add_loss_hppo_catch(loss1, loss2)
+                        else:
+                            # 累积经验但不学习
+                            print(f'【抓取模型累积经验】{training_manager.get_status()}')
+                            loss1, loss2 = 0, 0
                         # 立即落盘，避免仅在回合结束保存导致当轮loss缺失
                         try:
                             log_writer_catch.save_catch(log_file_latest_catch)
@@ -503,7 +562,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             print("tai_episoid:", tai_episoid)
             PPO_tai_episoid(existing_env=env, total_episode=total_episode, episode=tai_episoid,
                             log_writer_tai=log_writer_tai, log_file_latest_tai=log_file_latest_tai,
-                            catch_success=catch_success, tai_agent=tai_agent)
+                            catch_success=catch_success, tai_agent=tai_agent, training_manager=training_manager)
             tai_episoid += 1
             
             # 抬腿执行完毕，重置环境和抓取标记，准备下一个完整循环
@@ -553,11 +612,16 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
         # 记录决策的value值
         log_writer_decision.add(decision_value=decision_dict['value'])
         
-        # 训练决策智能体并获取loss（hppo只返回一个total_loss）
-        decision_loss = decision_hppo_agent.learn()
-        
-        # 记录决策的loss值
-        log_writer_decision.add(decision_loss=decision_loss)
+        # 【方案A】使用训练管理器控制学习频率
+        training_manager.increment_decision()
+        if training_manager.should_learn_decision():
+            decision_loss = decision_hppo_agent.learn()
+            print(f'【决策模型学习】{training_manager.get_status()} | decision_loss: {decision_loss:.6f}')
+            log_writer_decision.add(decision_loss=decision_loss)
+        else:
+            # 累积经验但不学习
+            print(f'【决策模型累积经验】{training_manager.get_status()}')
+            decision_loss = 0
         
         # 保存决策日志
         log_writer_decision.save_catch(log_file_latest_decision)

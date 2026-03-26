@@ -23,7 +23,7 @@ def validate_and_clean_data(data, default_value=0.0):
         return data
     else:
         return data
-def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_tai=None, log_file_latest_tai=None, catch_success=False, tai_agent=None):
+def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_tai=None, log_file_latest_tai=None, catch_success=False, tai_agent=None, training_manager=None):
 
     # 如果没有抓取成功，直接跳过抬腿阶段
     if not catch_success:
@@ -269,23 +269,53 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
         
         #学习过程
         if episode > 0 and done == 1:
-            # ========== Loss 计算 ==========
-            # 使用tai_agent进行学习，返回离散和连续两个损失
-            loss_discrete, loss_continuous = tai_agent.learn()
-            print("=" * 60)
-            print(f"【第 {episode} 回合训练完成】")
-            print(f"  累积奖励 (return_all): {return_all:.4f}")
-            print(f"  目标达成 (goal): {goal}")
-            print(f"  离散损失 (loss_discrete): {loss_discrete:.6f}")
-            print(f"  连续损失 (loss_continuous): {loss_continuous:.6f}")
-            print(f"  总损失 (total loss): {loss_discrete + loss_continuous:.6f}")
-            if gate_activation["steps"] > 0:
-                print(f"【门控激活率】")
-                print(f"  LegUpper 激活率: {gate_activation['upper'] / gate_activation['steps']:.2%}")
-                print(f"  LegLower 激活率: {gate_activation['lower'] / gate_activation['steps']:.2%}")
-                print(f"  Ankle 激活率: {gate_activation['ankle'] / gate_activation['steps']:.2%}")
-                print(f"  全关闭次数: {gate_activation['all_off']} / {int(gate_activation['steps'])}")
-            print("=" * 60)
+            # 【方案A】使用训练管理器控制学习频率
+            if training_manager is not None:
+                training_manager.increment_tai()
+                if training_manager.should_learn_tai():
+                    # ========== Loss 计算 ==========
+                    # 使用tai_agent进行学习，返回离散和连续两个损失
+                    loss_discrete, loss_continuous = tai_agent.learn()
+                    print("=" * 60)
+                    print(f"【抬腿模型学习】{training_manager.get_status()}")
+                    print(f"【第 {episode} 回合训练完成】")
+                    print(f"  累积奖励 (return_all): {return_all:.4f}")
+                    print(f"  目标达成 (goal): {goal}")
+                    print(f"  离散损失 (loss_discrete): {loss_discrete:.6f}")
+                    print(f"  连续损失 (loss_continuous): {loss_continuous:.6f}")
+                    print(f"  总损失 (total loss): {loss_discrete + loss_continuous:.6f}")
+                    if gate_activation["steps"] > 0:
+                        print(f"【门控激活率】")
+                        print(f"  LegUpper 激活率: {gate_activation['upper'] / gate_activation['steps']:.2%}")
+                        print(f"  LegLower 激活率: {gate_activation['lower'] / gate_activation['steps']:.2%}")
+                        print(f"  Ankle 激活率: {gate_activation['ankle'] / gate_activation['steps']:.2%}")
+                        print(f"  全关闭次数: {gate_activation['all_off']} / {int(gate_activation['steps'])}")
+                    print("=" * 60)
+                    
+                    # 记录损失值
+                else:
+                    # 累积经验但不学习
+                    print(f"【抬腿模型累积经验】{training_manager.get_status()}")
+                    loss_discrete, loss_continuous = 0, 0
+            else:
+                # 如果没有training_manager，使用原始逻辑（向后兼容）
+                # ========== Loss 计算 ==========
+                # 使用tai_agent进行学习，返回离散和连续两个损失
+                loss_discrete, loss_continuous = tai_agent.learn()
+                print("=" * 60)
+                print(f"【第 {episode} 回合训练完成】")
+                print(f"  累积奖励 (return_all): {return_all:.4f}")
+                print(f"  目标达成 (goal): {goal}")
+                print(f"  离散损失 (loss_discrete): {loss_discrete:.6f}")
+                print(f"  连续损失 (loss_continuous): {loss_continuous:.6f}")
+                print(f"  总损失 (total loss): {loss_discrete + loss_continuous:.6f}")
+                if gate_activation["steps"] > 0:
+                    print(f"【门控激活率】")
+                    print(f"  LegUpper 激活率: {gate_activation['upper'] / gate_activation['steps']:.2%}")
+                    print(f"  LegLower 激活率: {gate_activation['lower'] / gate_activation['steps']:.2%}")
+                    print(f"  Ankle 激活率: {gate_activation['ankle'] / gate_activation['steps']:.2%}")
+                    print(f"  全关闭次数: {gate_activation['all_off']} / {int(gate_activation['steps'])}")
+                print("=" * 60)
             
             # 记录损失值
             total_loss = loss_discrete + loss_continuous

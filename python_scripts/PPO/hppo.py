@@ -127,14 +127,14 @@ class HPPO:
         self.env_information = env_information
         # 超参数
         self.gamma = 0.99
-        self.gae_lambda = 0.95
-        self.clip_ratio = 0.2
-        self.policy_update_epochs = 10
-        self.value_coef = 0.5
+        self.gae_lambda = 0.90  # 🔧 降低从 0.95 -> 0.90，减缓 GAE 增长速度
+        self.clip_ratio = 0.15  # 🔧 降低从 0.2 -> 0.15，更保守的策略更新
+        self.policy_update_epochs = 2  # 🔧 降低从 3 -> 2，减少每个 batch 的更新轮数
+        self.value_coef = 0.25  # 🔧 降低从 0.5 -> 0.25，减弱价值损失权重
         self.entropy_coef = 0.01
         
         # 学习率设置 - 与其他PPO保持一致
-        self.lr = 2e-4  # 降低学习率，与PPO保持一致
+        self.lr = 3e-5  # 🔧 进一步降低从 5e-5 -> 3e-5，更稳定的参数更新
         self.lr_decay = 0.995  # 学习率衰减
         
         # 网络
@@ -182,6 +182,8 @@ class HPPO:
     def calculate_advantages(self):
         advantages = []
         gae = 0
+        max_gae = 10.0  # 🔧 添加 GAE 上界防止梯度爆炸
+        
         for i in reversed(range(len(self.rewards))):
             if i == len(self.rewards) - 1:
                 next_value = 0
@@ -189,15 +191,43 @@ class HPPO:
                 next_value = self.values[i + 1]
             delta = self.rewards[i] + self.gamma * next_value * (1 - self.dones[i]) - self.values[i]
             gae = delta + self.gamma * self.gae_lambda * (1 - self.dones[i]) * gae
+            
+            # 🔧 裁剪 GAE 防止指数级增长导致的梯度爆炸
+            gae = np.clip(gae, -max_gae, max_gae)
+            
             advantages.insert(0, gae)
-        return torch.tensor(advantages, dtype=torch.float32).to(device)
+        
+        advantages_tensor = torch.tensor(advantages, dtype=torch.float32).to(device)
+        
+        # 标准化处理
+        advantages_tensor = (advantages_tensor - advantages_tensor.mean()) / (advantages_tensor.std() + 1e-8)
+        
+        return advantages_tensor
 
     def learn(self):
         if len(self.states) < 32:
             return 0
 
-
         advantages = self.calculate_advantages()
+        
+        # 🔧 异常值检测和保护
+        if torch.isnan(advantages).any() or torch.isinf(advantages).any():
+            print("⚠️ 警告：Advantage 包含 NaN 或 Inf，跳过此次学习")
+            # 清空缓冲区
+            self.states = []
+            self.actions = []
+            self.rewards = []
+            self.next_states = []
+            self.values = []
+            self.log_probs = []
+            self.dones = []
+            return 0
+        
+        max_advantage = torch.abs(advantages).max().item()
+        if max_advantage > 50:
+            print(f"⚠️ 警告：Advantage 过大 ({max_advantage:.2f})，进行强制裁剪")
+            advantages = torch.clamp(advantages, -10, 10)
+        
         returns = advantages + torch.tensor(self.values, dtype=torch.float32).to(device)
         batch_states = self.states
         batch_discrete_actions = torch.tensor(self.actions, dtype=torch.float32).to(device)  # shape: [batch, num_servos]
@@ -251,4 +281,5 @@ class HPPO:
         self.values = []
         self.log_probs = []
         self.dones = []
+
         return total_loss / self.policy_update_epochs
