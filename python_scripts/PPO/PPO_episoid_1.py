@@ -196,6 +196,10 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
         decision = int(decision_dict['discrete_action'][0])
         print(f"上层决策 decision = {decision} (0=抓取, 1=爬梯)")
         decision_catch_success = catch_success
+        decision_reward = (5.0 if (decision == 0 and not decision_catch_success) else
+                   -15.0 if (decision == 0 and decision_catch_success) else
+                   10.0 if (decision == 1 and decision_catch_success) else
+                   -10.0)
 
 
         if decision == 0:
@@ -429,16 +433,30 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                 log_file_latest_single,
                 episode_num=episode_num,
                 action_type='抓取',
+                decision_reward=decision_reward,
                 catch_reward=return_all,
-                total_reward=return_all,
+                total_reward=return_all + decision_reward,
                 loss_discrete=catch_loss_discrete,
                 loss_continuous=catch_loss_continuous,
+                total_episode_num=total_episode,
+                phase_episode_num=episode_num,
             )
         else:
             print("🟢 进入【抬腿训练阶段】")
             # 只有抓取成功后才允许抬腿；未抓取成功则跳过本轮抬腿
             if not catch_success:
                 print("⚠️ 未检测到抓取成功，本轮跳过抬腿训练。")
+                log_writer.log_cycle(
+                    log_file_latest_single,
+                    episode_num=total_episode,
+                    action_type='抬腿-跳过',
+                    decision_reward=decision_reward,
+                    total_reward=decision_reward,
+                    loss_discrete=0,
+                    loss_continuous=0,
+                    total_episode_num=total_episode,
+                    phase_episode_num=tai_episoid,
+                )
                 total_episode += 1
                 continue
             # if success_flag1 == 1:
@@ -451,6 +469,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             PPO_tai_episoid(existing_env=env, total_episode=total_episode, episode=tai_episoid,
                             log_writer_tai=log_writer, log_file_latest_tai=log_file_latest_single,
                             catch_success=catch_success, hppo_agent=hppo_agent, training_manager=training_manager,
+                            decision_reward=decision_reward,
                             discrete_indices=(3, 4, 5), continuous_indices=(2, 3, 4))
             tai_episoid += 1
             
@@ -458,23 +477,6 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             catch_success = False
             env.reset()
             env.wait(500)
-
-        # 记录决策日志（单智能体）
-        log_writer.log_cycle(
-            log_file_latest_single,
-            episode_num=total_episode,
-            action_type='抓取' if decision == 0 else '抬腿',
-            decision_reward=(5.0 if (decision == 0 and not decision_catch_success) else
-                             -15.0 if (decision == 0 and decision_catch_success) else
-                             10.0 if (decision == 1 and decision_catch_success) else
-                             -10.0),
-            total_reward=(5.0 if (decision == 0 and not decision_catch_success) else
-                          -15.0 if (decision == 0 and decision_catch_success) else
-                          10.0 if (decision == 1 and decision_catch_success) else
-                          -10.0),
-            loss_discrete=0,
-            loss_continuous=0,
-        )
 
         total_episode += 1
 

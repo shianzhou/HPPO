@@ -21,6 +21,7 @@ def validate_and_clean_data(data, default_value=0.0):
         return data
 def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_tai=None, log_file_latest_tai=None,
                     catch_success=False, hppo_agent=None, training_manager=None,
+                    decision_reward=0.0,
                     discrete_indices=(0, 1, 2), continuous_indices=(0, 1, 2)):
 
     # 如果没有抓取成功，直接跳过抬腿阶段
@@ -294,10 +295,13 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
                 log_file_latest_tai,
                 episode_num=total_episode,
                 action_type='抬腿',
+                decision_reward=decision_reward,
                 tai_reward=return_all,
-                total_reward=return_all,
+                total_reward=return_all + decision_reward,
                 loss_discrete=loss_discrete,
                 loss_continuous=loss_continuous,
+                total_episode_num=total_episode,
+                phase_episode_num=episode,
             )
             gate_activation = {"upper": 0.0, "lower": 0.0, "ankle": 0.0, "all_off": 0, "steps": 0}
             

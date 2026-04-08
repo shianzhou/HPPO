@@ -51,8 +51,8 @@ class Log_write:
 
     def add_cycle_record(self, episode_num=None, action_type=None, decision_reward=None,
                          catch_reward=None, tai_reward=None, total_reward=None,
-                         loss_discrete=None, loss_continuous=None):
-        self.data['records'].append({
+                         loss_discrete=None, loss_continuous=None, **extra_fields):
+        record = {
             'episode_num': self._normalize_scalar(episode_num),
             'action_type': action_type,
             'decision_reward': self._normalize_scalar(decision_reward),
@@ -61,11 +61,14 @@ class Log_write:
             'total_reward': self._normalize_scalar(total_reward),
             'loss_discrete': self._normalize_scalar(loss_discrete),
             'loss_continuous': self._normalize_scalar(loss_continuous),
-        })
+        }
+        for key, value in extra_fields.items():
+            record[key] = self._normalize_scalar(value)
+        self.data['records'].append(record)
 
     def log_cycle(self, file_path, episode_num=None, action_type=None, decision_reward=None,
                   catch_reward=None, tai_reward=None, total_reward=None,
-                  loss_discrete=None, loss_continuous=None):
+                  loss_discrete=None, loss_continuous=None, **extra_fields):
         self.add_cycle_record(
             episode_num=episode_num,
             action_type=action_type,
@@ -75,6 +78,7 @@ class Log_write:
             total_reward=total_reward,
             loss_discrete=loss_discrete,
             loss_continuous=loss_continuous,
+            **extra_fields,
         )
         self.save(file_path)
 
