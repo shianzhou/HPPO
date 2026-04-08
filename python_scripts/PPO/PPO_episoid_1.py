@@ -220,7 +220,8 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
     training_manager = TrainingManager()
     
     # ===== 智能体实例化（统一放置） =====
-    hppo_agent = hppo(num_servos=2, node_num=19, env_information=None)          # 抓取阶段智能体
+    hppo_agent = hppo(num_servos=6, node_num=19, env_information=None)
+              # 抓取阶段智能体
     tai_agent = hppo(num_servos=3, node_num=19, env_information=None)       # 抬腿阶段智能体（复用）
     decision_hppo_agent = d_hppo(num_servos=1, node_num=19, env_information=None)  # 上层决策智能体
 
