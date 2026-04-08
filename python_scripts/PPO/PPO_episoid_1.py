@@ -205,6 +205,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
         # decision 来自第1个离散输出
         decision = int(decision_dict['discrete_action'][0])
         print(f"上层决策 decision = {decision} (0=抓取, 1=爬梯)")
+        decision_catch_success = catch_success
 
 
         if decision == 0:
@@ -212,7 +213,6 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             # catch_success由上一轮保持，不重置（除非抬腿完成后）
 
             # 直接使用外层的episode_num，不用for循环
-            log_writer_catch.add(episode_num=episode_num)
             print(f"<<<<<<<<<第{episode_num}周期")  # 打印当前周期
             env.reset()
             env.wait(500)  # 等待500ms
@@ -229,6 +229,8 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             prev_shoulder_action = 0.0
             prev_arm_action = 0.0
             prev_distance = None
+            catch_loss_discrete = 0
+            catch_loss_continuous = 0
             while True:
                     # print(f'第{episode_num}周期，第{steps}步')
                     ppo_state = [robot_state[1], robot_state[0], robot_state[5], robot_state[4]]  # 将机器人状态转换为ppo状态
@@ -271,10 +273,6 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                         catch_flag = 0.0  # 抓取器状态为0.0
                     img_name = "img" + str(steps) + ".png"  # 图像名称
                     # print("action:", a)
-                    # 分别添加动作、对数概率和状态价值到日志
-                    log_writer_catch.add_action_catch(action_shoulder, action_arm)
-                    log_writer_catch.add_log_prob_catch(log_prob_shoulder, log_prob_arm)
-                    log_writer_catch.add_value_catch(value, value)
                     # 执行一步动作
                     next_state, reward, done, good, goal, count = env.step(
                         robot_state,
@@ -405,18 +403,13 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                         training_manager.increment_shared()
                         if training_manager.should_learn_shared():
                             loss_d, loss_c = hppo_agent.learn()
+                            catch_loss_discrete, catch_loss_continuous = loss_d, loss_c
                             loss1, loss2 = loss_d, loss_c
                             print(f'【单智能体学习-抓取阶段】{training_manager.get_status()} | loss_discrete: {loss1:.6f}, loss_continuous: {loss2:.6f}')
-                            log_writer_catch.add_loss_hppo_catch(loss1, loss2)
                         else:
                             # 累积经验但不学习
                             print(f'【单智能体累积经验-抓取阶段】{training_manager.get_status()}')
                             loss1, loss2 = 0, 0
-                        # 立即落盘，避免仅在回合结束保存导致当轮loss缺失
-                        try:
-                            log_writer_catch.save_catch(log_file_latest_catch)
-                        except Exception as _e:
-                            print(f"保存抓取loss到日志失败: {_e}")
 
                         if episode_num % 100 == 0 and episode_num != 0:  # 每100步保存一次模型
                             save_path = os.path.join(catch_checkpoint_dir, f"single_hppo_{episode_num}.ckpt")
@@ -426,10 +419,6 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                                 'episode': episode_num
                             }
                             torch.save(checkpoint, save_path)
-
-                        log_writer_catch.add(return_all=return_all)
-                        # 写入目标
-                        log_writer_catch.add(goal=goal)
 
                     success_flag1 = env.darwin.get_touch_sensor_value('grasp_L1_2')
 
@@ -443,13 +432,18 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                         if success_flag1 == 1 and current_distance <= 0.04:
                             print("【抓取成功】保持机器人抓取状态，准备进行decision的下一步判断...")
                             env.wait(200)  # 等待机器人稳定
-                            log_writer_catch.save_catch(log_file_latest_catch)
                             break  # 退出抓取循环
     
-                        log_writer_catch.clear()
-                        log_writer_catch.save_catch(log_file_latest_catch)
                         break
-            log_writer_catch.save_catch(log_file_latest_catch)  # 保存日志
+            log_writer_catch.log_cycle(
+                log_file_latest_catch,
+                episode_num=episode_num,
+                action_type='抓取',
+                catch_reward=return_all,
+                total_reward=return_all,
+                loss_discrete=catch_loss_discrete,
+                loss_continuous=catch_loss_continuous,
+            )
         else:
             print("🟢 进入【抬腿训练阶段】")
             # 只有抓取成功后才允许抬腿；未抓取成功则跳过本轮抬腿
@@ -476,11 +470,21 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             env.wait(500)
 
         # 记录决策日志（单智能体）
-        log_writer_decision.add(episode_num=total_episode)
-        log_writer_decision.add(decision=decision)
-        log_writer_decision.add(catch_success=int(catch_success))
-        log_writer_decision.add(decision_value=decision_dict['value'])
-        log_writer_decision.save_catch(log_file_latest_decision)
+        log_writer_decision.log_cycle(
+            log_file_latest_decision,
+            episode_num=total_episode,
+            action_type='抓取' if decision == 0 else '抬腿',
+            decision_reward=(5.0 if (decision == 0 and not decision_catch_success) else
+                             -15.0 if (decision == 0 and decision_catch_success) else
+                             10.0 if (decision == 1 and decision_catch_success) else
+                             -10.0),
+            total_reward=(5.0 if (decision == 0 and not decision_catch_success) else
+                          -15.0 if (decision == 0 and decision_catch_success) else
+                          10.0 if (decision == 1 and decision_catch_success) else
+                          -10.0),
+            loss_discrete=0,
+            loss_continuous=0,
+        )
 
         total_episode += 1
 

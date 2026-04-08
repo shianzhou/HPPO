@@ -54,6 +54,8 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
     steps = 0
     catch_flag = 0
     gate_activation = {"upper": 0.0, "lower": 0.0, "ankle": 0.0, "all_off": 0, "steps": 0}
+    loss_discrete = 0
+    loss_continuous = 0
 
     # 初始化用于保持姿势的变量
     robot_state_initial = env.get_robot_state()
@@ -65,9 +67,6 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
     print("____________________")
    
 
-    # 记录回合数
-    log_writer_tai.add(episode_num=total_episode)
-    
     while True:
         obs_img, obs_tensor = env.get_img(steps, imgs)
         robot_state = env.get_robot_state()
@@ -135,12 +134,6 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
         gate_activation["lower"] += discrete_lower
         gate_activation["ankle"] += discrete_ankle
         
-        # 分别添加动作、对数概率和状态价值到日志
-        log_writer_tai.add_action_tai(action_LegUpper, action_LegLower, action_Ankle)
-        log_writer_tai.add_log_prob_tai(log_prob_LegUpper, log_prob_LegLower, log_prob_Ankle)
-        value_scalar = tai_value if isinstance(tai_value, (int, float)) else tai_value.item()
-        log_writer_tai.add_value_tai(value_scalar, value_scalar, value_scalar)
-
         print("第", steps + 1, "步")
         print(f"【hppo_agent门控控制】离散动作: [{discrete_upper}, {discrete_lower}, {discrete_ankle}]")
         print(f"【原始连续动作】LegUpper: {action_LegUpper_original:.4f}, LegLower: {action_LegLower_original:.4f}, Ankle: {action_Ankle_original:.4f}")
@@ -280,7 +273,6 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
                     print("=" * 60)
                 else:
                     print(f"【单智能体累积经验-抬腿阶段】{training_manager.get_status()}")
-                    loss_discrete, loss_continuous = 0, 0
             else:
                 loss_discrete, loss_continuous = hppo_agent.learn()
                 print("=" * 60)
@@ -298,30 +290,15 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
                     print(f"  全关闭次数: {gate_activation['all_off']} / {int(gate_activation['steps'])}")
                 print("=" * 60)
 
-            total_loss = loss_discrete + loss_continuous
-            log_writer_tai.add(loss=total_loss)
-            log_writer_tai.add(loss_discrete=loss_discrete)
-            log_writer_tai.add(loss_continuous=loss_continuous)
-            # ========== 记录结果 ==========
-            # return_all: 当前episode的累积奖励（所有步的reward之和）
-            # goal: 环境返回的目标达成标志（在RobotRun2.py中计算）
-            #   - goal=1: 脚部成功接触到梯子（touch传感器触发且距离较近）
-            #   - goal=0: 未达到目标或距离太远
-            log_writer_tai.add(return_all=return_all)
-            log_writer_tai.add(goal=goal)
-            if gate_activation["steps"] > 0:
-                log_writer_tai.add(
-                    gate_upper_ratio=gate_activation["upper"] / gate_activation["steps"]
-                )
-                log_writer_tai.add(
-                    gate_lower_ratio=gate_activation["lower"] / gate_activation["steps"]
-                )
-                log_writer_tai.add(
-                    gate_ankle_ratio=gate_activation["ankle"] / gate_activation["steps"]
-                )
-                log_writer_tai.add(
-                    gate_all_off_ratio=gate_activation["all_off"] / gate_activation["steps"]
-                )
+            log_writer_tai.log_cycle(
+                log_file_latest_tai,
+                episode_num=total_episode,
+                action_type='抬腿',
+                tai_reward=return_all,
+                total_reward=return_all,
+                loss_discrete=loss_discrete,
+                loss_continuous=loss_continuous,
+            )
             gate_activation = {"upper": 0.0, "lower": 0.0, "ankle": 0.0, "all_off": 0, "steps": 0}
             
             # 如果回合结束，重置环境
@@ -347,6 +324,5 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
             obs, obs_tensor = env.get_img(steps, imgs)
             robot_state = env.get_robot_state()
             
-            log_writer_tai.save_tai(log_file_latest_tai)
             break
         
