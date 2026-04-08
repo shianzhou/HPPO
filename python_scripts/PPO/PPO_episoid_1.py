@@ -138,10 +138,8 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
         env_information=None
     )
 
-    # ===== 日志写入器 =====
-    log_writer_catch = Log_write()  # 创建抓取日志写入器
-    log_writer_tai = Log_write()    # 创建抬腿日志写入器
-    log_writer_decision = Log_write()  # 创建决策日志写入器
+    # ===== 日志写入器（单文件） =====
+    log_writer = Log_write()
 
     # ===== 基础计数 =====
     tai_episoid = 1
@@ -150,18 +148,10 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
     catch_checkpoint_dir = path_list['model_path_catch_PPO_h']
     _ensure_dir(catch_checkpoint_dir)
 
-    # ===== 日志文件（自动递增编号） =====
-    # 确保日志目录存在
-    _ensure_dir(path_list['catch_log_path_PPO'])
-    _ensure_dir(path_list['tai_log_path_PPO'])
-    _ensure_dir(path_list['decision_log_path_PPO'])
-    
-    log_file_latest_catch = _next_log_file(path_list['catch_log_path_PPO'], 'catch_log')
-    log_file_latest_tai = _next_log_file(path_list['tai_log_path_PPO'], 'tai_log')
-    log_file_latest_decision = _next_log_file(path_list['decision_log_path_PPO'], 'decision_log')
-    print(f"将使用新的抓取日志目录: {log_file_latest_catch}")
-    print(f"将使用新抬腿的日志目录: {log_file_latest_tai}")
-    print(f"将使用新决策的日志目录: {log_file_latest_decision}")
+    # ===== 日志文件（自动递增编号，单文件） =====
+    _ensure_dir(path_list['single_log_path_PPO'])
+    log_file_latest_single = _next_log_file(path_list['single_log_path_PPO'], 'single_log')
+    print(f"将使用单智能体统一日志: {log_file_latest_single}")
 
     # ===== 模型加载（函数化） =====
     episode_start = load_single_model(model_path, hppo_agent, path_list['model_path_catch_PPO_h'])
@@ -435,8 +425,8 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                             break  # 退出抓取循环
     
                         break
-            log_writer_catch.log_cycle(
-                log_file_latest_catch,
+            log_writer.log_cycle(
+                log_file_latest_single,
                 episode_num=episode_num,
                 action_type='抓取',
                 catch_reward=return_all,
@@ -459,7 +449,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             #     total_episode = i
             print("tai_episoid:", tai_episoid)
             PPO_tai_episoid(existing_env=env, total_episode=total_episode, episode=tai_episoid,
-                            log_writer_tai=log_writer_tai, log_file_latest_tai=log_file_latest_tai,
+                            log_writer_tai=log_writer, log_file_latest_tai=log_file_latest_single,
                             catch_success=catch_success, hppo_agent=hppo_agent, training_manager=training_manager,
                             discrete_indices=(3, 4, 5), continuous_indices=(2, 3, 4))
             tai_episoid += 1
@@ -470,8 +460,8 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             env.wait(500)
 
         # 记录决策日志（单智能体）
-        log_writer_decision.log_cycle(
-            log_file_latest_decision,
+        log_writer.log_cycle(
+            log_file_latest_single,
             episode_num=total_episode,
             action_type='抓取' if decision == 0 else '抬腿',
             decision_reward=(5.0 if (decision == 0 and not decision_catch_success) else

@@ -39,6 +39,7 @@ path_list = {
     'model_path_decision_PPO_h': 'E:/project_MultiAgent_h/python_scripts/PPO/checkpoint_h/decision',
     'shu_ju_path_PPO':'E:/project_MultiAgent_h/python_scripts/PPO/shu_ju.txt',
     'gps_path_PPO':'E:/project_MultiAgent_h/python_scripts/PPO/gps.txt',
+    'single_log_path_PPO':'E:/project_MultiAgent_h/python_scripts/PPO/log/single_agent/',
     'catch_log_path_PPO':'E:/project_MultiAgent_h/python_scripts/PPO/log/catch_log/',
     'tai_log_path_PPO':'E:/project_MultiAgent_h/python_scripts/PPO/log/tai_log/',
     'decision_log_path_PPO':'E:/project_MultiAgent_h/python_scripts/PPO/log/decision_log/',
