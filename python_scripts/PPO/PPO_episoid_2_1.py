@@ -76,7 +76,7 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
         ppo_state = [robot_state[1], robot_state[0], robot_state[5], robot_state[4]]
         # 选择动作 - 单智能体输出后按索引切片到抬腿子动作
 
-        tai_dict = hppo_agent.choose_action(episode_num=episode,
+        tai_dict = hppo_agent.choose_action(episode_num=total_episode,
                                        obs=[obs_img, robot_state],
                                        x_graph=robot_state)
 
@@ -183,7 +183,7 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
             if prev_foot_height is not None:
                 height_diff = foot_height - prev_foot_height
 
-                if episode < 5:
+                if total_episode < 5:
                     # 前5个回合，鼓励抬高
                     if height_diff > 0:
                         reward += height_diff * 5.0  # 增加权重鼓励抬高
@@ -252,14 +252,14 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
             done = 1
             
         # 学习过程
-        if episode > 0 and done == 1:
+        if total_episode > 0 and done == 1:
             if training_manager is not None:
                 training_manager.increment_shared()
                 if training_manager.should_learn_shared():
                     loss_discrete, loss_continuous = hppo_agent.learn()
                     print("=" * 60)
                     print(f"【单智能体学习-抬腿阶段】{training_manager.get_status()}")
-                    print(f"【第 {episode} 回合训练完成】")
+                    print(f"【第 {total_episode} 回合训练完成】")
                     print(f"  累积奖励 (return_all): {return_all:.4f}")
                     print(f"  目标达成 (goal): {goal}")
                     print(f"  离散损失 (loss_discrete): {loss_discrete:.6f}")
@@ -277,7 +277,7 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
             else:
                 loss_discrete, loss_continuous = hppo_agent.learn()
                 print("=" * 60)
-                print(f"【第 {episode} 回合训练完成】")
+                print(f"【第 {total_episode} 回合训练完成】")
                 print(f"  累积奖励 (return_all): {return_all:.4f}")
                 print(f"  目标达成 (goal): {goal}")
                 print(f"  离散损失 (loss_discrete): {loss_discrete:.6f}")

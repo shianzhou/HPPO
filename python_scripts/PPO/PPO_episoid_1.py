@@ -78,6 +78,11 @@ def _latest_single_ckpt(dir_path: str):
     selected = max(files, key=_num)
     return selected, _num(selected)
 
+
+def _reset_env_for_next_decision(env, wait_ms: int = 500):
+    env.reset()
+    env.wait(wait_ms)
+
 # ===== 模型加载工具函数（提炼提高可读性） =====
 def load_single_model(model_path: str, hppo_agent, ckpt_dir: str) -> int:
     """加载单智能体模型，优先指定路径；否则自动加载目录最新。"""
@@ -167,13 +172,14 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
     MAX_TOTAL_EPISODE = 3000
 
     env = Environment()  # 仍然只有一个 env
+    _reset_env_for_next_decision(env, 500)
 
     while total_episode < MAX_TOTAL_EPISODE:
+        need_reset_after_cycle = True
 
         print(f"\n==============================")
         print(f"🌍 Total Episode {total_episode}")
         print(f"==============================")
-        env.reset()
         # ---------- 上层决策 ----------
         # 修复：添加 imgs 参数
         d_steps = 0
@@ -207,7 +213,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             # catch_success由上一轮保持，不重置（除非抬腿完成后）
 
             # 直接使用外层的episode_num，不用for循环
-            print(f"<<<<<<<<<第{episode_num}周期")  # 打印当前周期
+            print(f"<<<<<<<<<抓取阶段动作计数 {episode_num}")  # 打印当前抓取阶段计数
             env.reset()
             env.wait(500)  # 等待500ms
             imgs = []  # 初始化图像列表
@@ -226,7 +232,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             catch_loss_discrete = 0
             catch_loss_continuous = 0
             while True:
-                    # print(f'第{episode_num}周期，第{steps}步')
+                    # print(f'总周期{total_episode}，第{steps}步')
                     ppo_state = [robot_state[1], robot_state[0], robot_state[5], robot_state[4]]  # 将机器人状态转换为ppo状态
                     # log_writer.add(ppo_state=ppo_state, steps=steps)
                     obs = (obs_tensor, robot_state)
@@ -236,7 +242,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                     # x_graph = torch.tensor(robot_state, dtype=torch.float32).unsqueeze(1).to(device)  # 添加维度
                     # 输入次数、状态，选择动作
 
-                    dict = hppo_agent.choose_action(episode_num=episode_num,
+                    dict = hppo_agent.choose_action(episode_num=total_episode,
                                                     obs=obs,
                                                     x_graph=robot_state)
 
@@ -257,7 +263,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                     masked_shoulder = prev_shoulder_action if int(d1) == 0 else cur_shoulder
                     masked_arm = prev_arm_action if int(d2) == 0 else cur_arm
                     print(
-                        f'第{episode_num}周期，第{steps}步, 离散数值：(决策{int(d_action[0])},抓取{int(d1)}/{int(d2)}), 连续: ({action_shoulder.item():.4f},{action_arm.item():.4f}), 实际: ({masked_shoulder:.4f},{masked_arm:.4f})')
+                        f'第{total_episode}总周期，第{steps}步, 离散数值：(决策{int(d_action[0])},抓取{int(d1)}/{int(d2)}), 连续: ({action_shoulder.item():.4f},{action_arm.item():.4f}), 实际: ({masked_shoulder:.4f},{masked_arm:.4f})')
 
 
                     gps1, gps2, gps3, gps4, foot_gps1 = env.print_gps()  # 获取GPS位置
@@ -375,15 +381,14 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
 
                     obs_tensor = next_obs_tensor  # 更新图像张量
                     # if temp < 5000:  # 如果经验回放缓存小于3000
-                    # episode_num = 0  # 计数器为0
-                    if episode_num >= 0 and done == 1:  # 只有在buffer中存满了数据才会学习
+                    if done == 1:  # 只有在当前决策周期结束后才学习
                         if goal == 1:  # 如果达到目标
                             print("goal = 1")
-                            save_path = os.path.join(catch_checkpoint_dir, f"single_hppo_{episode_num}.ckpt")
+                            save_path = os.path.join(catch_checkpoint_dir, f"single_hppo_{total_episode}.ckpt")
                             checkpoint = {
                                 'policy': hppo_agent.policy.state_dict(),
                                 'optimizer_hppo': hppo_agent.optimizer.state_dict(),
-                                'episode': episode_num
+                                'episode': total_episode
                             }
                             torch.save(checkpoint, save_path)
                         # print("11111111111111111111111111111111111111111-303")
@@ -405,12 +410,12 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                             print(f'【单智能体累积经验-抓取阶段】{training_manager.get_status()}')
                             loss1, loss2 = 0, 0
 
-                        if episode_num % 100 == 0 and episode_num != 0:  # 每100步保存一次模型
-                            save_path = os.path.join(catch_checkpoint_dir, f"single_hppo_{episode_num}.ckpt")
+                        if total_episode % 100 == 0 and total_episode != 0:  # 每100个总周期保存一次模型
+                            save_path = os.path.join(catch_checkpoint_dir, f"single_hppo_{total_episode}.ckpt")
                             checkpoint = {
                                 'policy': hppo_agent.policy.state_dict(),
                                 'optimizer_hppo': hppo_agent.optimizer.state_dict(),
-                                'episode': episode_num
+                                'episode': total_episode
                             }
                             torch.save(checkpoint, save_path)
 
@@ -426,6 +431,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                         if success_flag1 == 1 and current_distance <= 0.04:
                             print("【抓取成功】保持机器人抓取状态，准备进行decision的下一步判断...")
                             env.wait(200)  # 等待机器人稳定
+                            need_reset_after_cycle = False
                             break  # 退出抓取循环
     
                         break
@@ -441,6 +447,8 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                 total_episode_num=total_episode,
                 phase_episode_num=episode_num,
             )
+            if not need_reset_after_cycle:
+                catch_success = True
         else:
             print("🟢 进入【抬腿训练阶段】")
             # 只有抓取成功后才允许抬腿；未抓取成功则跳过本轮抬腿
@@ -457,6 +465,12 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                     total_episode_num=total_episode,
                     phase_episode_num=tai_episoid,
                 )
+                if training_manager is not None:
+                    training_manager.increment_shared()
+                    if training_manager.should_learn_shared():
+                        loss_discrete, loss_continuous = hppo_agent.learn()
+                        print(f"【单智能体学习-跳过抬腿阶段】{training_manager.get_status()} | loss_discrete: {loss_discrete:.6f}, loss_continuous: {loss_continuous:.6f}")
+                _reset_env_for_next_decision(env, 500)
                 total_episode += 1
                 continue
             # if success_flag1 == 1:
@@ -475,8 +489,10 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             
             # 抬腿执行完毕，重置环境和抓取标记，准备下一个完整循环
             catch_success = False
-            env.reset()
-            env.wait(500)
+            need_reset_after_cycle = False
+
+        if need_reset_after_cycle:
+            _reset_env_for_next_decision(env, 500)
 
         total_episode += 1
 
