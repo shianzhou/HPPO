@@ -83,6 +83,17 @@ def _reset_env_for_next_decision(env, wait_ms: int = 500):
     env.reset()
     env.wait(wait_ms)
 
+
+def _save_single_checkpoint(agent, ckpt_dir: str, total_episode: int):
+    save_path = os.path.join(ckpt_dir, f"single_hppo_{total_episode}.ckpt")
+    checkpoint = {
+        'policy': agent.policy.state_dict(),
+        'optimizer_hppo': agent.optimizer.state_dict(),
+        'episode': total_episode
+    }
+    torch.save(checkpoint, save_path)
+    print(f"模型已保存: {save_path}")
+
 # ===== 模型加载工具函数（提炼提高可读性） =====
 def load_single_model(model_path: str, hppo_agent, ckpt_dir: str) -> int:
     """加载单智能体模型，优先指定路径；否则自动加载目录最新。"""
@@ -144,7 +155,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
     )
 
     # ===== 日志写入器（单文件） =====
-    log_writer = Log_write()
+    log_writer = Log_write(keep_records=False)
 
     # ===== 基础计数 =====
     tai_episoid = 1
@@ -170,6 +181,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
     # 上层总训练循环（新增）
     # ===============================
     MAX_TOTAL_EPISODE = 3000
+    SAVE_INTERVAL = 100
 
     env = Environment()  # 仍然只有一个 env
     _reset_env_for_next_decision(env, 500)
@@ -382,15 +394,6 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                     obs_tensor = next_obs_tensor  # 更新图像张量
                     # if temp < 5000:  # 如果经验回放缓存小于3000
                     if done == 1:  # 只有在当前决策周期结束后才学习
-                        if goal == 1:  # 如果达到目标
-                            print("goal = 1")
-                            save_path = os.path.join(catch_checkpoint_dir, f"single_hppo_{total_episode}.ckpt")
-                            checkpoint = {
-                                'policy': hppo_agent.policy.state_dict(),
-                                'optimizer_hppo': hppo_agent.optimizer.state_dict(),
-                                'episode': total_episode
-                            }
-                            torch.save(checkpoint, save_path)
                         # print("11111111111111111111111111111111111111111-303")
                         # loss_shoulder = ppo_shoulder.learn(action_type='shoulder')
                         # print("22222222222222222222222222222222222222222-305")
@@ -410,14 +413,8 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                             print(f'【单智能体累积经验-抓取阶段】{training_manager.get_status()}')
                             loss1, loss2 = 0, 0
 
-                        if total_episode % 100 == 0 and total_episode != 0:  # 每100个总周期保存一次模型
-                            save_path = os.path.join(catch_checkpoint_dir, f"single_hppo_{total_episode}.ckpt")
-                            checkpoint = {
-                                'policy': hppo_agent.policy.state_dict(),
-                                'optimizer_hppo': hppo_agent.optimizer.state_dict(),
-                                'episode': total_episode
-                            }
-                            torch.save(checkpoint, save_path)
+                        if total_episode % SAVE_INTERVAL == 0 and total_episode != 0:  # 每固定总周期保存一次模型
+                            _save_single_checkpoint(hppo_agent, catch_checkpoint_dir, total_episode)
 
                     success_flag1 = env.darwin.get_touch_sensor_value('grasp_L1_2')
 
@@ -495,6 +492,9 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             _reset_env_for_next_decision(env, 500)
 
         total_episode += 1
+
+    # 训练结束时额外保存一次最终模型
+    _save_single_checkpoint(hppo_agent, catch_checkpoint_dir, total_episode)
 
     # 如果整个训练过程结束，返回抓取成功状态和环境实例
     return False, env

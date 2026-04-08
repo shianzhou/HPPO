@@ -1,5 +1,4 @@
 import json
-import re
 from datetime import datetime
 
 import numpy as np
@@ -32,12 +31,15 @@ class CustomJSONEncoder(json.JSONEncoder):
 
 
 class Log_write:
-    def __init__(self):
+    def __init__(self, keep_records=True):
+        self.keep_records = bool(keep_records)
         self.data = {
             'start time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'save time': [],
-            'records': [],
+            'series': {},
         }
+        if self.keep_records:
+            self.data['records'] = []
 
     def _normalize_scalar(self, value):
         if hasattr(value, 'item') and callable(value.item):
@@ -48,6 +50,54 @@ class Log_write:
         if isinstance(value, np.ndarray) and value.size == 1:
             return value.item()
         return value
+
+    def _append_series_record(self, record):
+        series = self.data.setdefault('series', {})
+        existing_count = 0
+        if series:
+            first_key = next(iter(series))
+            existing_count = len(series[first_key])
+
+        for key in record:
+            if key not in series:
+                series[key] = [None] * existing_count
+
+        for key, values in series.items():
+            values.append(self._normalize_scalar(record.get(key)))
+
+    def _series_length(self):
+        series = self.data.get('series', {})
+        if not series:
+            return 0
+        first_key = next(iter(series))
+        return len(series[first_key])
+
+    def _is_scalar(self, value):
+        return value is None or isinstance(value, (bool, int, float, str))
+
+    def _dump_with_inline_lists(self, obj, indent=4, level=0):
+        pad = ' ' * (indent * level)
+        next_pad = ' ' * (indent * (level + 1))
+
+        if isinstance(obj, dict):
+            if not obj:
+                return '{}'
+            items = []
+            for key, value in obj.items():
+                key_text = json.dumps(str(key), ensure_ascii=False)
+                value_text = self._dump_with_inline_lists(value, indent, level + 1)
+                items.append(f"{next_pad}{key_text}: {value_text}")
+            return '{\n' + ',\n'.join(items) + '\n' + pad + '}'
+
+        if isinstance(obj, list):
+            if not obj:
+                return '[]'
+            if all(self._is_scalar(v) for v in obj):
+                return json.dumps(obj, ensure_ascii=False, separators=(', ', ': '))
+            items = [self._dump_with_inline_lists(v, indent, level + 1) for v in obj]
+            return '[\n' + ',\n'.join(f"{next_pad}{item}" for item in items) + '\n' + pad + ']'
+
+        return json.dumps(obj, ensure_ascii=False)
 
     def add_cycle_record(self, episode_num=None, action_type=None, decision_reward=None,
                          catch_reward=None, tai_reward=None, total_reward=None,
@@ -66,7 +116,9 @@ class Log_write:
         }
         for key, value in extra_fields.items():
             record[key] = self._normalize_scalar(value)
-        self.data['records'].append(record)
+        if self.keep_records:
+            self.data['records'].append(record)
+        self._append_series_record(record)
 
     def log_cycle(self, file_path, episode_num=None, action_type=None, decision_reward=None,
                   catch_reward=None, tai_reward=None, total_reward=None,
@@ -101,6 +153,9 @@ class Log_write:
     def add(self, **kwargs):
         if not kwargs:
             return
+        if not self.keep_records:
+            self.add_cycle_record(**kwargs)
+            return
         if not self.data['records']:
             self.data['records'].append({})
         record = self.data['records'][-1]
@@ -111,7 +166,7 @@ class Log_write:
         return
 
     def reset(self):
-        self.__init__()
+        self.__init__(keep_records=self.keep_records)
 
     def get(self, key):
         return self.data.get(key, [])
@@ -133,26 +188,10 @@ class Log_write:
             data_to_save = self.data
 
         try:
-            json_data = json.dumps(data_to_save, cls=CustomJSONEncoder, indent=4, ensure_ascii=False)
+            formatted_json = self._dump_with_inline_lists(data_to_save, indent=4, level=0)
         except Exception as e:
-            print(f'Error during JSON serialization: {e}')
+            print(f'Error during JSON formatting: {e}')
             return
-
-        pattern = r'\[\s*(-?\d+\.?\d*(?:\s*,\s*-?\d+\.?\d*)*)\s*\]'
-
-        def compress_list(match):
-            list_content = match.group(0)
-            compressed_content = re.sub(r'\s+', ' ', list_content)
-            compressed_content = re.sub(r'\s*,\s*', ', ', compressed_content)
-            compressed_content = re.sub(r'\[\s+', '[', compressed_content)
-            compressed_content = re.sub(r'\s+\]', ']', compressed_content)
-            return compressed_content.strip()
-
-        try:
-            formatted_json = re.sub(pattern, compress_list, json_data, flags=re.MULTILINE)
-        except Exception as e:
-            print(f'Error during regex formatting: {e}')
-            formatted_json = json_data
 
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -162,3 +201,30 @@ class Log_write:
             print(f'错误：无法写入日志文件: {e}')
         except Exception as e:
             print(f'保存过程中发生意外错误: {e}')
+
+    def save_series(self, file_path, keys=None, include_meta=True):
+        """保存适合画图的列式日志，每个字段对应一个数组。"""
+        series_data = dict(self.data.get('series', {}))
+
+        if keys is not None:
+            series_data = {key: series_data.get(key, []) for key in keys}
+
+        if include_meta:
+            series_data['start time'] = self.data.get('start time')
+            series_data['save time'] = list(self.data.get('save time', []))
+            series_data['record_count'] = self._series_length()
+
+        try:
+            formatted_json = self._dump_with_inline_lists(series_data, indent=4, level=0)
+        except Exception as e:
+            print(f'Error during series formatting: {e}')
+            return
+
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(formatted_json)
+            print('系列日志保存成功')
+        except IOError as e:
+            print(f'错误：无法写入系列日志文件: {e}')
+        except Exception as e:
+            print(f'保存系列日志过程中发生意外错误: {e}')
