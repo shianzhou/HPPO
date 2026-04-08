@@ -109,12 +109,12 @@ class HPPO:
         self.gamma = 0.99
         self.gae_lambda = 0.95
         self.clip_ratio = 0.2
-        self.policy_update_epochs = 10
+        self.policy_update_epochs = 3  # 【修改】从10轮减少到3轮，防止梯度聚集
         self.value_coef = 0.5
         self.entropy_coef = 0.01
         
         # 学习率设置 - 与其他PPO保持一致
-        self.lr = 2e-4  # 降低学习率，与PPO保持一致
+        self.lr = 5e-5  # 【修改】从2e-4降低到5e-5，进一步降低学习率避免参数剧烈波动
         self.lr_decay = 0.995  # 学习率衰减
         
         # 网络
@@ -264,11 +264,19 @@ class HPPO:
 
         # 转换为张量并移动到设备
         batch_states = self.states  # 列表，每个元素是状态元组
-        # Categorical 需要 Long 索引
-        batch_discrete_actions = torch.tensor(self.discrete_actions, dtype=torch.long).to(self.device)
-        batch_continuous_actions = torch.tensor(self.continuous_actions, dtype=torch.float32).to(self.device)
-        batch_discrete_log_probs = torch.tensor(self.discrete_log_probs, dtype=torch.float32).to(self.device)
-        batch_continuous_log_probs = torch.tensor(self.continuous_log_probs, dtype=torch.float32).to(self.device)
+        # 先汇总为 numpy 数组，再转 tensor，避免 list[np.ndarray] 的慢路径告警
+        batch_discrete_actions = torch.as_tensor(
+            np.asarray(self.discrete_actions), dtype=torch.long, device=self.device
+        )
+        batch_continuous_actions = torch.as_tensor(
+            np.asarray(self.continuous_actions), dtype=torch.float32, device=self.device
+        )
+        batch_discrete_log_probs = torch.as_tensor(
+            np.asarray(self.discrete_log_probs), dtype=torch.float32, device=self.device
+        )
+        batch_continuous_log_probs = torch.as_tensor(
+            np.asarray(self.continuous_log_probs), dtype=torch.float32, device=self.device
+        )
 
         # 标准化优势
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)

@@ -52,6 +52,7 @@ class ActorCritic(nn.Module):
         )
         # 初始化log_sigma为更小的值
         self.actor_log_sigma = nn.Parameter(torch.zeros(act_dim) * 0.1)  # 可学习的对数标准差
+        self.exploration_factor = 1.0  # 控制连续动作噪声大小
         
         # Critic头：输出状态值
         self.critic = nn.Linear(200, 1)
@@ -190,24 +191,10 @@ class ActorCritic(nn.Module):
             return dist, value
         
         # Actor: 输出动作分布的参数
-        if torch.cuda.is_available():
-            with torch.cuda.amp.autocast(enabled=True):
-                mu = self.actor_mu(features)
-                log_sigma = self.actor_log_sigma.expand_as(mu)
-                sigma = torch.exp(log_sigma) + 1e-6
-                
-                # 数值检查
-                if torch.isnan(mu).any() or torch.isinf(mu).any() or \
-                   torch.isnan(sigma).any() or torch.isinf(sigma).any():
-                    print("警告:动作分布中出现NaN或Inf，使用默认分布-----------201")
-                    mu = torch.zeros_like(self.actor_mu(torch.zeros_like(features))).to(device)
-                    sigma = torch.ones_like(mu).to(device) * 0.1
-                    dist = Normal(mu, sigma)
-                    return dist, value
-        else:
+        with torch.cuda.amp.autocast(enabled=True):
             mu = self.actor_mu(features)
             log_sigma = self.actor_log_sigma.expand_as(mu)
-            sigma = torch.exp(log_sigma) + 1e-6
+            sigma = (torch.exp(log_sigma) + 1e-6) * self.exploration_factor
             
             # 数值检查
             if torch.isnan(mu).any() or torch.isinf(mu).any() or \
@@ -221,19 +208,7 @@ class ActorCritic(nn.Module):
         dist = Normal(mu, sigma)  # 创建正态分布
     
         # Critic: 输出状态值
-        if torch.cuda.is_available():
-            with torch.cuda.amp.autocast(enabled=True):
-                value = self.critic(features)
-                
-                # 数值检查
-                if torch.isnan(value).any() or torch.isinf(value).any():
-                    print("警告:值中出现NaN或Inf，使用默认分布和值---------215")
-                    mu = torch.zeros_like(self.actor_mu(torch.zeros_like(features))).to(device)
-                    sigma = torch.ones_like(mu).to(device) * 0.1
-                    dist = Normal(mu, sigma)
-                    value = torch.zeros(1).to(device)
-                    return dist, value
-        else:
+        with torch.cuda.amp.autocast(enabled=True):
             value = self.critic(features)
             
             # 数值检查
@@ -256,6 +231,9 @@ class ActorCritic(nn.Module):
 
         return dist, value
 
+    def set_exploration_factor(self, factor: float):
+        self.exploration_factor = max(factor, 0.05)
+
 class PPO2:
     def __init__(self, node_num, env_information=None):
         """
@@ -267,11 +245,8 @@ class PPO2:
         self.node_num = node_num
         self.env_information = env_information
         
-        # 混合精度训练 - 只在CUDA可用时启用
-        if torch.cuda.is_available():
-            self.scaler = torch.cuda.amp.GradScaler()
-        else:
-            self.scaler = None
+        # 混合精度训练
+        self.scaler = torch.cuda.amp.GradScaler()
         
         # PPO超参数
         self.gamma = 0.99  # 折扣因子
@@ -290,7 +265,7 @@ class PPO2:
         # PPO更新参数
         self.policy_update_epochs = 5  # 减少更新轮数以加快训练
         self.batch_size = 32  # 减小批量大小
-        self.mini_batch_size = 8  # 小批量大小
+        self.mini_batch_size = 4  # 小批量大小
 
         # 初始化策略网络
         self.policy = ActorCritic(act_dim=1, node_num=self.node_num).to(device) 
@@ -336,6 +311,9 @@ class PPO2:
             动作、对数概率和状态值
         """
         with torch.no_grad():
+            sigma_factor = self._get_exploration_factor(episode_num)
+            self.policy.set_exploration_factor(sigma_factor)
+
             dist, value = self.policy(x=obs[0], state=obs[1], x_graph=x_graph)
             
             if dist is None:
@@ -363,6 +341,22 @@ class PPO2:
             value_rounded = round(value.item(), 6)
            
             return  action_clamped.item(), log_prob_rounded, value_rounded
+
+    def evaluate_log_prob(self, obs, x_graph, action: float):
+        with torch.no_grad():
+            dist, _ = self.policy(x=obs[0], state=obs[1], x_graph=x_graph)
+            if dist is None:
+                return 0.0
+            action_t = torch.tensor([action], dtype=torch.float32, device=device)
+            log_prob = dist.log_prob(action_t).sum(dim=-1)
+            return round(log_prob.item(), 6)
+
+    def _get_exploration_factor(self, episode_num):
+        start_factor = 1.8  # 增加初始探索范围
+        end_factor = 0.25
+        decay_episode = 6000  # 延长探索衰减时间
+        progress = min(max(episode_num, 0) / decay_episode, 1.0)
+        return start_factor + (end_factor - start_factor) * progress
     
     # def store_transition_catch(self, state, action_shoulder, action_arm, reward, next_state, done, value, log_prob):
     #     """存储轨迹数据"""
@@ -428,35 +422,7 @@ class PPO2:
             self.current_step += 1
                 
             # 计算优势函数和回报
-            if torch.cuda.is_available():
-                with torch.cuda.amp.autocast():
-                    # 确保所有张量都在正确的设备上
-                    rewards = torch.tensor(self.rewards, dtype=torch.float32, device=device)
-                    values = torch.tensor(self.values, dtype=torch.float32, device=device)
-                    dones = torch.tensor(self.dones, dtype=torch.float32, device=device)
-
-                    # 计算GAE
-                    advantages = []
-                    gae = 0
-                    next_value = 0.0  # 假设最后一个状态的价值为0
-
-                    for i in reversed(range(len(rewards))):
-                        if i < len(rewards) - 1:
-                            next_value = values[i + 1]
-                        delta = rewards[i] + self.gamma * next_value * (1 - dones[i]) - values[i]
-                        gae = delta + self.gamma * self.gae_lambda * (1 - dones[i]) * gae
-                        advantages.insert(0, gae)
-
-                    advantages = torch.tensor(advantages, dtype=torch.float32, device=device)
-                    returns = advantages + values
-
-                    # 归一化优势函数
-                    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-
-                    # 转换为张量
-                    batch_actions = torch.tensor(self.actions, dtype=torch.float32, device=device)
-                    batch_log_probs = torch.tensor(self.log_probs, dtype=torch.float32, device=device)
-            else:
+            with torch.cuda.amp.autocast():
                 # 确保所有张量都在正确的设备上
                 rewards = torch.tensor(self.rewards, dtype=torch.float32, device=device)
                 values = torch.tensor(self.values, dtype=torch.float32, device=device)
@@ -529,63 +495,44 @@ class PPO2:
                 all_log_stds.requires_grad_(True)
                 all_values.requires_grad_(True)
 
-                if torch.cuda.is_available():
-                    with torch.cuda.amp.autocast():
-                        # 创建分布
-                        dist = torch.distributions.Normal(all_means, torch.exp(all_log_stds))
-                        
-                        # 计算新的对数概率
-                        new_log_probs = dist.log_prob(batch_actions.unsqueeze(-1))
-                        
-                        # 计算熵
-                        entropy = dist.entropy().mean()
-                        
-                        # 计算比率
-                        ratio = torch.exp(new_log_probs - batch_log_probs.unsqueeze(-1))
-                        
-                        # 裁剪比率
-                        surr1 = ratio * advantages_batch.unsqueeze(-1)
-                        surr2 = torch.clamp(ratio, 1 - self.clip_ratio, 1 + self.clip_ratio) * advantages_batch.unsqueeze(-1)
-                        
-                        # 策略损失
-                        policy_loss = -torch.min(surr1, surr2).mean()
-                        
-                        # 值函数损失
-                        value_loss = nn.MSELoss()(all_values.squeeze(), returns_batch)
-                        
-                        # 总损失
-                        loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy
-
-                        # 检查最终损失
-                        if torch.isnan(loss).any():
-                            print("Warning: NaN in final loss")
-                            print(f"policy_loss: {policy_loss.item()}, value_loss: {value_loss.item()}, entropy: {entropy.item()}")
-                            print(f"loss: {loss.item()}")
-                            continue
-                else:
-                    # 创建分布
+                with torch.cuda.amp.autocast():
+                    # ========== PPO Loss 计算详解 ==========
+                    # 1. 创建动作分布（正态分布）
                     dist = torch.distributions.Normal(all_means, torch.exp(all_log_stds))
                     
-                    # 计算新的对数概率
+                    # 2. 计算新策略下的动作对数概率
+                    #    new_log_probs = log π_θ(a_t | s_t)
                     new_log_probs = dist.log_prob(batch_actions.unsqueeze(-1))
                     
-                    # 计算熵
+                    # 3. 计算熵（用于鼓励探索）
+                    #    entropy = -Σ p(a) * log(p(a))
                     entropy = dist.entropy().mean()
                     
-                    # 计算比率
+                    # 4. 计算重要性采样比率
+                    #    ratio = π_θ(a_t | s_t) / π_θ_old(a_t | s_t) = exp(new_log_prob - old_log_prob)
                     ratio = torch.exp(new_log_probs - batch_log_probs.unsqueeze(-1))
                     
-                    # 裁剪比率
+                    # 5. PPO裁剪目标函数
+                    #    surr1 = ratio * A_t (未裁剪)
+                    #    surr2 = clip(ratio, 1-ε, 1+ε) * A_t (裁剪后)
+                    #    取两者最小值，防止策略更新过大
                     surr1 = ratio * advantages_batch.unsqueeze(-1)
                     surr2 = torch.clamp(ratio, 1 - self.clip_ratio, 1 + self.clip_ratio) * advantages_batch.unsqueeze(-1)
                     
-                    # 策略损失
+                    # 6. 策略损失（最大化策略性能，所以取负号）
+                    #    policy_loss = -E[min(surr1, surr2)]
                     policy_loss = -torch.min(surr1, surr2).mean()
                     
-                    # 值函数损失
+                    # 7. 值函数损失（预测值与真实回报的均方误差）
+                    #    value_loss = MSE(V_θ(s_t), R_t)
+                    #    其中 R_t = advantages + values (GAE回报)
                     value_loss = nn.MSELoss()(all_values.squeeze(), returns_batch)
                     
-                    # 总损失
+                    # 8. 总损失 = 策略损失 + 值函数损失系数 * 值函数损失 - 熵系数 * 熵
+                    #    loss = policy_loss + value_coef * value_loss - entropy_coef * entropy
+                    #    超参数：
+                    #    - value_coef = 0.5 (值函数损失权重)
+                    #    - entropy_coef = 0.02 (熵正则化权重，鼓励探索)
                     loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy
 
                     # 检查最终损失
@@ -598,29 +545,18 @@ class PPO2:
                 # 梯度清零
                 self.optimizer.zero_grad()
                 
-                # 使用混合精度训练（如果可用）
-                if self.scaler is not None:
-                    with torch.cuda.amp.autocast():
-                        # 缩放损失并反向传播
-                        self.scaler.scale(loss).backward()
-                        
-                        # 梯度裁剪
-                        self.scaler.unscale_(self.optimizer)
-                        # torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
-                        #20250922修改参数，由于loss值太大
-                        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.1)
-                        # 更新参数
-                        self.scaler.step(self.optimizer)
-                        self.scaler.update()
-                else:
-                    # 标准训练（无混合精度）
-                    loss.backward()
+                # 使用混合精度训练
+                with torch.cuda.amp.autocast():
+                    # 缩放损失并反向传播
+                    self.scaler.scale(loss).backward()
                     
                     # 梯度裁剪
-                    # torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
-                    torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.1)
+                    self.scaler.unscale_(self.optimizer)
+                    torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
+                    
                     # 更新参数
-                    self.optimizer.step()
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
                 
                 total_loss += loss.item()
             

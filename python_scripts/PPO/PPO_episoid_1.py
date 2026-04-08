@@ -1,550 +1,500 @@
 # 测试
 import torch
-from python_scripts.PPO.PPO_PPOnet_2 import PPO2
-from python_scripts.PPO.PPO_PPOnet import PPO
-from python_scripts.PPO.hppo import HPPO
-from python_scripts.PPO.Replay_memory import ReplayMemory
-from python_scripts.PPO.Replay_memory_2 import ReplayMemory_2
 from python_scripts.PPO.PPO_episoid_2_1 import PPO_tai_episoid
 from python_scripts.Webots_interfaces import Environment
 from python_scripts.PPO.hppo_01 import HPPO as hppo
-
 # from Data_fusion import data_fusion
-from python_scripts.Project_config import path_list, gps_goal, gps_goal1, device
+from python_scripts.Project_config import path_list, gps_goal
 from python_scripts.PPO_Log_write import Log_write
 
 
-def calculate_distance(robot_pos, object_pos):
-    """
-    计算机器人末端（例如夹爪）和物体之间的欧氏距离。
-    假设 pos 是 [x, y] 或 [x, y, z] 格式的。
-    """
-    if not robot_pos or not object_pos:
-        return float('inf')
-    # 确保 positions 是 numpy 数组
-    robot_pos = np.array(robot_pos)
-    object_pos = np.array(object_pos)
-    squared_diff = (robot_pos - object_pos) ** 2
-    return np.sqrt(np.sum(squared_diff))
+# ===== 路径与文件工具函数（统一管理） =====
+import os
+import glob
+import re
 
 
-def compute_catch_reward(env, steps, success_flag, goal_achieved, given_close_reward_flag, prev_distance):
+# ===== 方案A: 训练管理器（同步三个模型的更新频率） =====
+class TrainingManager:
     """
-    抓取任务的综合奖励函数（包含过程奖励）
+    单智能体学习节奏管理。
+    核心思想：抓取和抬腿都先积累经验，再按统一间隔学习。
     """
-    reward = -0.1  # 每步的基础惩罚
-    print(f"步骤 {steps}: 计算奖励...")  # 添加一些打印，方便调试
+    def __init__(self):
+        self.shared_episodes = 0
+        
+        # 统一学习间隔，避免同一智能体在不同阶段过于频繁更新
+        self.shared_learn_interval = 3
+        
+        print("【训练管理器初始化】")
+        print(f"  单智能体学习间隔: {self.shared_learn_interval}个episodes")
+    
+    def should_learn_shared(self) -> bool:
+        """决定是否执行单智能体学习"""
+        result = (self.shared_episodes % self.shared_learn_interval == 0) and (self.shared_episodes > 0)
+        return result
+    
+    def increment_shared(self):
+        """单智能体episode计数加1"""
+        self.shared_episodes += 1
+    
+    def get_status(self) -> str:
+        """获取当前训练状态"""
+        return f"[TrainingManager] Shared:{self.shared_episodes}"
 
-    # --- 【新增】获取当前距离和计算过程奖励 ---
+
+def _ensure_dir(path: str) -> None:
     try:
-        # ... (你的过程奖励计算逻辑) ...
-        # 例如：
-        # robot_gripper_pos = ...
-        # object_pos = ...
-        # current_distance = calculate_distance(robot_gripper_pos, object_pos)
+        os.makedirs(path, exist_ok=True)
+    except Exception:
+        pass
 
-        # 为了演示，我们用一个假想的逻辑
-        object_gps = [5.0, 0.0]  # 假设物体在 (5, 0) 位置
-        robot_gps = env.print_gps()
-        if robot_gps:  # 确保有gps数据
-            robot_gps_xy = np.array([robot_gps[1], robot_gps[2]])
-            current_distance = calculate_distance(robot_gps_xy, object_gps)
+def _next_log_file(dir_path: str, prefix: str) -> str:
+    pattern = os.path.join(dir_path, f"{prefix}_*.json")
+    existing = glob.glob(pattern)
+    max_n = 0
+    for p in existing:
+        m = re.search(rf"{re.escape(prefix)}_(\d+)\.json$", os.path.basename(p))
+        if m:
+            try:
+                n = int(m.group(1))
+                if n > max_n:
+                    max_n = n
+            except Exception:
+                continue
+    return os.path.join(dir_path, f"{prefix}_{max_n + 1}.json")
 
-            process_reward = 0.0
-            if prev_distance < float('inf') and current_distance < float('inf'):
-                distance_change = prev_distance - current_distance
-                process_reward = distance_change * 0.5
-                print(f"    -> 过程奖励: {process_reward:.4f} (距离从 {prev_distance:.4f} 变为 {current_distance:.4f})")
+def _latest_single_ckpt(dir_path: str):
+    """加载目录中最新的 single_hppo_*.ckpt。"""
+    files = glob.glob(os.path.join(dir_path, "single_hppo_*.ckpt"))
+    if not files:
+        return None, 0
 
-            reward += process_reward
-            prev_distance = current_distance
-        else:
-            print("    -> [警告] 无法获取GPS，跳过过程奖励。")
+    def _num(f: str) -> int:
+        b = os.path.basename(f)
+        m_new = re.search(r"single_hppo_(\d+)\.ckpt$", b)
+        return int(m_new.group(1)) if m_new else -1
+
+    selected = max(files, key=_num)
+    return selected, _num(selected)
 
 
-    except Exception as e:
-        print(f"    -> [警告] 过程奖励计算失败: {e}，将跳过。")
-        # 如果计算失败，prev_distance 保持不变
+def _reset_env_for_next_decision(env, wait_ms: int = 500):
+    env.reset()
+    env.wait(wait_ms)
 
-    # ... (原有的成功/失败逻辑，保持不变) ...
-    if success_flag == 1:
-        reward += 50.0
-        return reward, True, prev_distance  # 新增返回 prev_distance
-
-    if goal_achieved and not given_close_reward_flag:
-        reward += 5.0
-        given_close_reward_flag = True
-        return reward, given_close_reward_flag, prev_distance  # 新增返回 prev_distance
-
-    # ... (Episode失败的逻辑) ...
-
-    # 修改所有返回值，都把 prev_distance 带上
-    return reward, given_close_reward_flag, prev_distance
-
-def PPO_episoid_1(model_path=None, max_steps_per_episode=500):
-
-    hppo_agent = hppo(num_servos=2,node_num=19,env_information=None)
-
-    # ppo_arm = PPO(node_num=19, env_information=None)  # 创建PPO对象
-    # ppo_shoulder = PPO(node_num=19, env_information=None)  # 创建PPO对象
-    #
-    # # 混合动作：两个离散开关（肩、臂是否运动）
-    # hppo_switch_catch = HPPO(num_servos=2, node_num=19, env_information=None)
-
-    ppo2_LegUpper = PPO2(node_num=19, env_information=None)  # 创建PPO2对象
-    ppo2_LegLower = PPO2(node_num=19, env_information=None)  # 创建PPO2对象
-    ppo2_Ankle = PPO2(node_num=19, env_information=None)  # 创建PPO2对象
-
-    # 初始化日志写入器
-    log_writer_catch = Log_write()  # 创建抓取日志写入器
-    log_writer_tai = Log_write()  # 创建抬腿日志写入器
-
-    tai_episoid = 1
-    import os
-    import glob
-    import re
-    # 查找现有的日志文件，确定最新的编号
-    # 抓取阶段：
-    log_pattern = os.path.join(path_list['catch_log_path_PPO'], 'catch_log_*.json')
-    existing_logs = glob.glob(log_pattern)
-    latest_num = 0
-    if existing_logs:
-        # 从文件名中提取编号
-        for log_path in existing_logs:
-            match = re.search(r'catch_log_(\d+)', log_path)
-            if match:
-                num = int(match.group(1))
-                latest_num = max(latest_num, num)
-        # 新的日志文件编号
-        new_log_num = latest_num + 1
-    else:
-        # 没有现有日志文件，从1开始
-        new_log_num = 1
-    log_file_latest_catch = os.path.join(path_list['catch_log_path_PPO'], f"catch_log_{new_log_num}.json")
-    print(f"将使用新的抓取日志目录: {log_file_latest_catch}")
-
-    # 抬腿阶段：
-    log_pattern = os.path.join(path_list['tai_log_path_PPO'], 'tai_log_*.json')
-    existing_logs = glob.glob(log_pattern)
-    latest_num = 0
-    if existing_logs:
-        # 从文件名中提取编号
-        for log_path in existing_logs:
-            match = re.search(r'tai_log_(\d+)', log_path)
-            if match:
-                num = int(match.group(1))
-                latest_num = max(latest_num, num)
-        # 新的日志文件编号
-        new_log_num = latest_num + 1
-    else:
-        # 没有现有日志文件，从1开始
-        new_log_num = 1
-    log_file_latest_tai = os.path.join(path_list['tai_log_path_PPO'], f"tai_log_{new_log_num}.json")
-    print(f"将使用新抬腿的日志目录: {log_file_latest_tai}")
-
-    # 加载模型
-    # 抓取模型加载
-    # checkpoint = {
-    #     'policy': hppo_agent.policy.state_dict(),
-    #     'optimizer_hppo': hppo_agent.optimizer.state_dict(),
-    #     'episode': i
-    # }
-    if model_path:  # 如果指定了模型路径
+# ===== 模型加载工具函数（提炼提高可读性） =====
+def load_single_model(model_path: str, hppo_agent, ckpt_dir: str) -> int:
+    """加载单智能体模型，优先指定路径；否则自动加载目录最新。"""
+    episode_start = 0
+    if model_path:
         try:
-            # 从指定路径加载模型
-            checkpoint = torch.load(model_path)
-            if isinstance(checkpoint, dict) and 'policy' in checkpoint:
-                # 如果是保存的字典格式 {'policy': state_dict, ...}
-                # ppo_shoulder.policy.load_state_dict(checkpoint['policy_shoulder'])
-                # ppo_arm.policy.load_state_dict(checkpoint['policy_arm'])
-                hppo_agent.policy.load_state_dict(checkpoint['policy'])
-                # 如果需要加载优化器状态
-                # if 'optimizer_shoulder' in checkpoint and ppo_shoulder.optimizer:
-                #     ppo_shoulder.optimizer.load_state_dict(checkpoint['optimizer_shoulder'])
-                # if 'optimizer_arm' in checkpoint and ppo_arm.optimizer:
-                #     ppo_arm.optimizer.load_state_dict(checkpoint['optimizer_arm'])
-                if'optimizer_hppo' in checkpoint and hppo_agent.optimizer:
-                    hppo_agent.optimizer.load_state_dict(checkpoint['optimizer_hppo'])
-                print(f"从指定模型加载: {model_path}，模型加载成功！")
-                episode_start = int(model_path.split('_')[-1].split('.')[0])
-                print(f"从指定模型加载: {model_path}，从周期 {episode_start} 继续训练")
+            ckpt = torch.load(model_path)
+            if isinstance(ckpt, dict) and 'policy' in ckpt:
+                hppo_agent.policy.load_state_dict(ckpt['policy'])
+                if 'optimizer_hppo' in ckpt and hppo_agent.optimizer:
+                    hppo_agent.optimizer.load_state_dict(ckpt['optimizer_hppo'])
+                print(f"从指定模型加载: {model_path}，单智能体模型加载成功！")
+                try:
+                    episode_start = int(os.path.basename(model_path).split('_')[-1].split('.')[0])
+                    print(f"从指定模型加载: {model_path}，从周期 {episode_start} 继续训练")
+                except Exception:
+                    pass
             else:
-                # 如果是直接保存的模型或状态字典
-                # ppo_shoulder.policy.load_state_dict(checkpoint)
-                # ppo_arm.policy.load_state_dict(checkpoint)
-                hppo_agent.policy.load_state_dict(checkpoint)
-                print("从指定模型加载: {model_path}，模型加载成功！(旧格式)")
-                episode_start = 0
+                hppo_agent.policy.load_state_dict(ckpt)
+                print(f"从指定模型加载: {model_path}，单智能体模型加载成功！")
         except Exception as e:
             print(f"指定模型加载失败: {e}")
             episode_start = 0
-    else:  # 如果没有指定模型路径，使用原来的自动查找逻辑
-        # 获取所有模型文件
-        model_files = glob.glob(path_list['model_path_catch_PPO'] + '/ppo_model_*.ckpt')
-        if model_files:
-            # 按文件名中的数字排序，获取最新的模型文件
-            latest_model = max(model_files, key=lambda x: int(x.split('_')[-1].split('.')[0]))
-            episode_start = int(latest_model.split('_')[-1].split('.')[0])
-            print(f"找到最新抓取模型: {latest_model}，从周期 {episode_start} 继续训练")
-            
-            # 加载模型
-            try:
-                checkpoint = torch.load(latest_model)
-                if isinstance(checkpoint, dict) and 'policy' in checkpoint:
-                    # 如果是保存的字典格式 {'policy': state_dict, ...}
-                    # ppo_shoulder.policy.load_state_dict(checkpoint['policy_shoulder'])
-                    # ppo_arm.policy.load_state_dict(checkpoint['policy_arm'])
-                    hppo_agent.policy.load_state_dict(checkpoint['policy'])
-                    # 如果需要加载优化器状态
-                    # if 'optimizer_shoulder' in checkpoint and ppo_shoulder.optimizer:
-                    #     ppo_shoulder.optimizer.load_state_dict(checkpoint['optimizer_shoulder'])
-                    # if 'optimizer_arm' in checkpoint and ppo_arm.optimizer:
-                    #     ppo_arm.optimizer.load_state_dict(checkpoint['optimizer_arm'])
-                    if 'optimizer_hppo' in checkpoint and hppo_agent.optimizer:
-                       hppo_agent.optimizer.load_state_dict(checkpoint['optimizer_shoulder'])
-                    print("抓取模型加载成功！")
-                else:
-                    # 如果是直接保存的模型或状态字典
-                    # ppo_shoulder.policy.load_state_dict(checkpoint)
-                    # ppo_arm.policy.load_state_dict(checkpoint)
-                    hppo_agent.policy.load_state_dict(checkpoint)
-                    print("抓取模型加载成功！(旧格式)")
-            except Exception as e:
-                print(f"抓取模型加载失败: {e}")
-                episode_start = 0
-        else:
-            print("未找到已保存的抓取模型，从头开始训练")
-            episode_start = 0
-    
-    # 抬腿模型加载
-    model_files_tai = glob.glob(path_list['model_path_tai_PPO'] + '/ppo_model_tai_*.ckpt')
-    if model_files_tai:
+        return episode_start
+
+    # 未指定路径，查找目录最新
+    selected_model, episode_start = _latest_single_ckpt(ckpt_dir)
+    if selected_model:
         try:
-            # 按新的文件名格式排序：ppo_model_tai_{total_episoid}_{episode}.ckpt
-            # 定义一个函数来提取total_episoid和episode
-            def extract_numbers(filename):
-                # 从文件名中提取数字部分
-                parts = filename.split('_')
-                if len(parts) >= 5:  # 确保文件名格式正确
-                    try:
-                        total_ep = int(parts[-2])  # 倒数第二个是total_episoid
-                        ep = int(parts[-1].split('.')[0])  # 最后一个是episode（去掉.ckpt）
-                        return (total_ep, ep)
-                    except (ValueError, IndexError):
-                        return (0, 0)  # 解析失败时返回默认值
-                return (0, 0)
-            
-            # 按照total_episoid和episode排序，找出最新的模型
-            latest_model = max(model_files_tai, key=extract_numbers)
-            total_ep, ep = extract_numbers(latest_model)
-            print(f"找到最新抬腿模型: {latest_model}，总周期: {total_ep}，抬腿周期: {ep}")
-            tai_episoid = ep
-            print(f"抬腿模型从周期 {tai_episoid} 继续训练")
-            # 加载模型
-            try:
-                checkpoint = torch.load(latest_model)
-                # 判断是否为新版字典格式（包含各关节 policy 键）
-                if isinstance(checkpoint, dict) and 'policy_LegUpper' in checkpoint:
-                    # 如果是保存的字典格式 {'policy_LegUpper': state_dict, ...}
-                    ppo2_LegUpper.policy.load_state_dict(checkpoint['policy_LegUpper'])
-                    ppo2_LegLower.policy.load_state_dict(checkpoint['policy_LegLower'])
-                    ppo2_Ankle.policy.load_state_dict(checkpoint['policy_Ankle'])
-                    # 如果需要加载优化器状态
-                    if 'optimizer_LegUpper' in checkpoint and ppo2_LegUpper.optimizer:
-                        ppo2_LegUpper.optimizer.load_state_dict(checkpoint['optimizer_LegUpper'])
-                    if 'optimizer_LegLower' in checkpoint and ppo2_LegLower.optimizer:
-                        ppo2_LegLower.optimizer.load_state_dict(checkpoint['optimizer_LegLower'])
-                    if 'optimizer_Ankle' in checkpoint and ppo2_Ankle.optimizer:
-                        ppo2_Ankle.optimizer.load_state_dict(checkpoint['optimizer_Ankle'])
-                    print("抬腿模型加载成功！")
-                else:
-                    # 如果是直接保存的模型或状态字典
-                    ppo2_LegUpper.policy.load_state_dict(checkpoint)
-                    ppo2_LegLower.policy.load_state_dict(checkpoint)
-                    ppo2_Ankle.policy.load_state_dict(checkpoint)
-                    print("抬腿模型加载成功！(旧格式)")
-            except Exception as e:
-                print(f"抬腿模型加载失败: {e}")
+            ckpt = torch.load(selected_model)
+            if isinstance(ckpt, dict) and 'policy' in ckpt:
+                hppo_agent.policy.load_state_dict(ckpt['policy'])
+                if 'optimizer_hppo' in ckpt and hppo_agent.optimizer:
+                    hppo_agent.optimizer.load_state_dict(ckpt['optimizer_hppo'])
+                print("单智能体模型加载成功！")
+            else:
+                hppo_agent.policy.load_state_dict(ckpt)
+                print("单智能体模型加载成功！")
         except Exception as e:
-            print(f"抬腿模型加载失败: {e}")
+            print(f"单智能体模型加载失败: {e}")
+            episode_start = 0
     else:
-        print("未找到已保存的抬腿模型，从头开始训练")
+        print("未找到已保存的单智能体模型，从头开始训练")
+        episode_start = 0
+    return episode_start
 
 
-
-
-    episode_num = episode_start  # 初始化回合计数器
-    #rpm = ReplayMemory(100000)  # 创建经验回放缓存
-    #rpm_2 = ReplayMemory_2(100000)
-    env = Environment()
-    success_catch = 0                  # 抓取成功次数
-
-    for i in range(episode_start, episode_start + 5000):  # 从episode_start开始，最多再训练10000个周期
-        log_writer_catch.add(episode_num=i)
-        print(f"<<<<<<<<<第{i}周期") # 打印当前周期
-        env.reset()
-        env.wait(500)   # 等待500ms
-        imgs = []  # 初始化图像列表
-        steps = 0  # 初始化步数
-        return_all = 0  # 初始化总奖励
-        obs_img, obs_tensor = env.get_img(steps, imgs)  # 获取初始图像和图像张量
-        # log_writer.add(obs_img=obs_img, steps=steps)
-        robot_state = env.get_robot_state()  # 获取机器人状态
-        # print(f'robot_state: {robot_state}')
-        # print(f'robot_state_len: {len(robot_state)}')
-        print("____________________")  # 打印初始状态
-        # 记录上一次实际发送到环境的动作（用于离散=0时保持不变）
-        prev_shoulder_action = 0.0
-        prev_arm_action = 0.0
-        prev_distance = None
-        while True:
-            # print(f'第{episode_num}周期，第{steps}步')
-            ppo_state = [robot_state[1], robot_state[0], robot_state[5], robot_state[4]]  # 将机器人状态转换为ppo状态
-            # log_writer.add(ppo_state=ppo_state, steps=steps)
-            obs = (obs_tensor, robot_state)
-            # log_writer.add(obs=obs, steps=steps)
-            # 将机器人状态转换为张量
-            # x_graph = torch.tensor(robot_state, dtype=torch.float32).to(device)
-            # x_graph = torch.tensor(robot_state, dtype=torch.float32).unsqueeze(1).to(device)  # 添加维度
-            # 输入次数、状态，选择动作
-            # action_dict = {
-            #     'discrete_action': discrete_action.cpu().numpy(),
-            #     'continuous_action': continuous_action.cpu().numpy(),
-            #     'discrete_log_prob': discrete_log_prob.cpu().numpy(),
-            #     'continuous_log_prob': continuous_log_prob.cpu().numpy(),
-            #     'value': value.item()  # 状态价值是标量
-            # }
-            dict = hppo_agent.choose_action(episode_num=i,
-                                            obs=obs,
-                                            x_graph=robot_state)
-
-            d_action = dict['discrete_action']
-
-            action_shoulder = dict['continuous_action'][0]
-            action_arm = dict['continuous_action'][1]
-            log_prob_shoulder = dict['continuous_log_prob'][0]
-            log_prob_arm = dict['continuous_log_prob'][1]
-            value = dict['value']
-
-
-            # action_shoulder , log_prob_shoulder , value_shoulder = ppo_shoulder.choose_action(episode_num=i,
-            #                       obs=obs,
-            #                       x_graph=robot_state,
-            #                       action_type='shoulder')
-            # action_arm , log_prob_arm , value_arm = ppo_arm.choose_action(episode_num=i,
-            #                       obs=obs,
-            #                       x_graph=robot_state,
-            #                       action_type='arm')
-            # 离散开关：d0->shoulder, d1->arm (0/1)
-            # d_action, d_log_prob, d_value = hppo_switch_catch.choose_action(
-            #     episode_num=i,
-            #     obs=obs,
-            #     x_graph=robot_state
-            # )
-            # 转为0/1掩码
-            d0 = float(d_action[0])
-            d1 = float(d_action[1])
-            cur_shoulder = float(action_shoulder.item())
-            cur_arm = float(action_arm.item())
-            # 若离散为0，则保持上一时刻指令
-            masked_shoulder = prev_shoulder_action if int(d0) == 0 else cur_shoulder
-            masked_arm = prev_arm_action if int(d1) == 0 else cur_arm
-            print(f'第{i}周期，第{steps}步, 离散数值：({int(d0)},{int(d1)}), 连续: ({action_shoulder.item():.4f},{action_arm.item():.4f}), 实际: ({masked_shoulder:.4f},{masked_arm:.4f})')
-            
-            # # 简化动作处理逻辑
-            # if isinstance(a, tuple):
-            #     # 如果是元组，取第一个元素作为动作
-            #     action_value = a[0]
-            # else:
-            #     # 否则直接使用a
-            #     action_value = a
-            # # 确保action_value是标量
-            # if hasattr(action_value, 'cpu'):
-            #     action_value = action_value.cpu()
-            # if hasattr(action_value, 'item'):
-            #     action_value = action_value.item()
-                
-            gps1, gps2, gps3, gps4, foot_gps1 = env.print_gps()  # 获取GPS位置
-            if steps >= 19:  # 如果步数大于等于19
-                catch_flag = 1.0  # 抓取器状态为1.0
-            else:
-                catch_flag = 0.0  # 抓取器状态为0.0
-            img_name = "img" + str(steps) + ".png"  # 图像名称
-            # print("action:", a)
-            # 分别添加动作、对数概率和状态价值到日志
-            log_writer_catch.add_action_catch(action_shoulder, action_arm) 
-            log_writer_catch.add_log_prob_catch(log_prob_shoulder, log_prob_arm)
-            log_writer_catch.add_value_catch(value, value)
-            # 执行一步动作
-            next_state, reward, done, good, goal, count = env.step(
-                robot_state,
-                masked_shoulder,
-                masked_arm,
-                steps,
-                catch_flag,
-                gps1,
-                gps2,
-                gps3,
-                gps4,
-                img_name
-            )
-            # 更新上一时刻动作
-            prev_shoulder_action = masked_shoulder
-            prev_arm_action = masked_arm
-            print(f'catch_flag: {catch_flag}')
-            print(f'done: {done}')
-
-            gps1, _, _, _, _ = env.print_gps()
-            # 安全检查：确保gps1有足够的元素
-            if len(gps1) < 3:
-                print(f"警告：gps1长度不足 ({len(gps1)} < 3)，使用默认值")
-                dx = 0.0
-                dy = 0.0
-            else:
-                dx = gps_goal[0] - gps1[1]
-                dy = gps_goal[1] - gps1[2]
-            current_distance = (dx ** 2 + dy ** 2) ** 0.5
-
-            # 距离变化奖励（鼓励靠近目标）
-            success_flag1 = env.darwin.get_touch_sensor_value('grasp_L1_2')
-            if prev_distance is not None:
-                distance_reward = (prev_distance - current_distance) * 15.0  # 增加距离奖励权重
-            else:
-                distance_reward = -current_distance  # 初始奖励
-
-                # 组合奖励
-                prev_distance = current_distance  # 更新
-
-            # 添加距离奖励：越接近目标奖励越高
-            proximity_reward = max(0, (0.5 - current_distance) * 5.0)  # 距离小于0.5时给额外奖励
-
-            #动作程度奖惩
-            action_magnitude = (abs(cur_shoulder) + abs(cur_arm)) / 2.0
-            inactivity_penalty = -0.2 if action_magnitude < 0.05 else 0.0
-            if int(d0) == 0 and int(d1) == 0:
-                inactivity_penalty += -0.3
-            large_action_penalty = -0.05 * (abs(cur_shoulder) > 0.9 or abs(cur_arm) > 0.9)
-
-            # --- 合并奖励 ---
-            reward = distance_reward + proximity_reward + inactivity_penalty + large_action_penalty - 0.5 * steps
-
-
-            # 稀疏奖励：到达目标附近额外加分
-            if success_flag1 == 1:
-                reward += 20.   # 增加成功奖励
-
-            return_all = return_all + reward  # 总奖励为当前奖励加上之前的总奖励
-            steps += 1  # 步数加1
-            next_obs_img, next_obs_tensor = env.get_img(steps, imgs)  # 获取下一个图像和图像张量
-            next_obs = [next_obs_img, next_state]
-            # print('获取下一个状态更新完毕')
-            # 可以修改reward值让其训练速度加快
-            if good == 1:  # 如果good为1
-                hppo_agent.store_transition(
-                    state=[obs_img, robot_state, robot_state],
-                    discrete_action=d_action,
-                    continuous_action=dict['continuous_action'],
-                    reward=reward,
-                    next_state=[next_obs_img, next_state, next_state],
-                    done=done,
-                    value=value,
-                    discrete_log_prob=dict['discrete_log_prob'],
-                    continuous_log_prob=dict['continuous_log_prob']
-                )
-            robot_state = env.get_robot_state()  # 获取机器人状态
-
-
-
-            obs_tensor = next_obs_tensor  # 更新图像张量
-            #if temp < 5000:  # 如果经验回放缓存小于3000
-                #episode_num = 0  # 计数器为0
-            if i >= 0 and done == 1:  # 只有在buffer中存满了数据才会学习
-                if goal == 1:  # 如果达到目标
-                    print("goal = 1")
-                    save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i  # 保存模型
-                    # checkpoint = {
-                    #     'policy_shoulder': ppo_shoulder.policy.state_dict(),
-                    #     'optimizer_shoulder': ppo_shoulder.optimizer.state_dict(),
-                    #     'policy_arm': ppo_arm.policy.state_dict(),
-                    #     'optimizer_arm': ppo_arm.optimizer.state_dict(),
-                    #     'episode': i
-                    # }
-                    checkpoint = {
-                        'policy':hppo_agent.policy.state_dict(),
-                        'optimizer_hppo':hppo_agent.optimizer.state_dict(),
-                        'episode':i
-                    }
-                    torch.save(checkpoint, save_path)
-                # print("11111111111111111111111111111111111111111-303")
-                # loss_shoulder = ppo_shoulder.learn(action_type='shoulder')
-                # print("22222222222222222222222222222222222222222-305")
-                # loss_arm = ppo_arm.learn(action_type='arm')
-                # # 学习离散HPPO
-                # loss_hppo = hppo_switch_catch.learn()
-                loss_d,loss_c = hppo_agent.learn()
-
-                loss1,loss2 =  loss_d,loss_c
-
-                # print('loss_arm:', loss_arm)
-                # print('loss_shoulder:', loss_shoulder)
-                # print('loss_hppo:', loss_hppo)
-                print('loss_discrete:', loss1 ,'loss_continuous:',loss2)
-                
-                # 分别记录三个智能体的loss值
-                log_writer_catch.add_loss_hppo_catch(loss1,loss2)
-                # 立即落盘，避免仅在回合结束保存导致当轮loss缺失
-                try:
-                    log_writer_catch.save_catch(log_file_latest_catch)
-                except Exception as _e:
-                    print(f"保存抓取loss到日志失败: {_e}")
-               
-                if i % 100 == 0 and i != 0:  # 每100步保存一次模型
-                    save_path = path_list['model_path_catch_PPO'] + '/ppo_model_%s.ckpt' % i  # 保存模型
-                    # checkpoint = {
-                    #     'policy_shoulder': ppo_shoulder.policy.state_dict(),
-                    #     'optimizer_shoulder': ppo_shoulder.optimizer.state_dict(),
-                    #     'policy_arm': ppo_arm.policy.state_dict(),
-                    #     'optimizer_arm': ppo_arm.optimizer.state_dict(),
-                    #     'episode': i
-                    # }
-                    checkpoint = {
-                        'policy': hppo_agent.policy.state_dict(),
-                        'optimizer_hppo': hppo_agent.optimizer.state_dict(),
-                        'episode': i
-                    }
-                    torch.save(checkpoint, save_path)
-
-                log_writer_catch.add(return_all=return_all)
-                # 写入目标
-                log_writer_catch.add(goal=goal)
-                
-            success_flag1 = env.darwin.get_touch_sensor_value('grasp_L1_2')
-
-            if catch_flag == 1.0 or done == 1:  # 如果抓取器状态为1.0或完成
-                # 写入重置标志
-                # if(success_flag1 == 0):
-                #     env.reset()  # 重置环境
-                env.wait(100)  # 等待100ms
-                imgs = []  # 初始化图像列表
-                steps = 0  # 初始化步数
-                episode_num = episode_num + 1  # 计数器加1
-                # obs, obs_tensor = env.get_img(steps, imgs)  # 获取初始图像和图像张量
-                # robot_state = env.get_robot_state()  # 获取机器人状态
-                log_writer_catch.clear()
-                log_writer_catch.save_catch(log_file_latest_catch)  # 保存日志
-                break
-
-        if success_flag1 == 1:
-            success_catch += 1
-            log_writer_catch.add(success_catch=success_catch)
-            print("success_catch:", success_catch)
-            print("抓取成功，开始抬腿训练...")
-            total_episode = i
-            print("tai_episoid:", tai_episoid)
-            PPO_tai_episoid(ppo2_LegUpper=ppo2_LegUpper, ppo2_LegLower=ppo2_LegLower, ppo2_Ankle=ppo2_Ankle, existing_env=env, total_episode=total_episode, episode=tai_episoid, log_writer_tai=log_writer_tai, log_file_latest_tai=log_file_latest_tai)
-            tai_episoid += 1 
-
+def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
+    # ===== 训练管理器初始化（方案A核心） =====
+    training_manager = TrainingManager()
     
-    log_writer_catch.save_catch(log_file_latest_catch)  # 保存日志
+    # ===== 智能体实例化（单智能体：6离散 + 5连续） =====
+    # 离散映射: 0=决策, 1-2=抓取, 3-5=抬腿
+    # 连续映射: 0-1=抓取, 2-4=踩踏(抬腿)
+    hppo_agent = hppo(
+        num_servos=6,
+        node_num=19,
+        env_information=None
+    )
+
+    # ===== 日志写入器（单文件） =====
+    log_writer = Log_write()
+
+    # ===== 基础计数 =====
+    tai_episoid = 1
+
+    # ===== 模型保存目录（统一，使用配置的新路径） =====
+    catch_checkpoint_dir = path_list['model_path_catch_PPO_h']
+    _ensure_dir(catch_checkpoint_dir)
+
+    # ===== 日志文件（自动递增编号，单文件） =====
+    _ensure_dir(path_list['single_log_path_PPO'])
+    log_file_latest_single = _next_log_file(path_list['single_log_path_PPO'], 'single_log')
+    print(f"将使用单智能体统一日志: {log_file_latest_single}")
+
+    # ===== 模型加载（函数化） =====
+    episode_start = load_single_model(model_path, hppo_agent, path_list['model_path_catch_PPO_h'])
+
+    # ===== 索引与计数（集中管理） =====
+    episode_num = episode_start           # 抓取阶段起始轮次
+    total_episode = 0                     # 总轮次计数
+    catch_success = False                 # 跨episode标记：上一轮是否抓取成功
+
+    # ===============================
+    # 上层总训练循环（新增）
+    # ===============================
+    MAX_TOTAL_EPISODE = 3000
+
+    env = Environment()  # 仍然只有一个 env
+    _reset_env_for_next_decision(env, 500)
+
+    while total_episode < MAX_TOTAL_EPISODE:
+        need_reset_after_cycle = True
+
+        print(f"\n==============================")
+        print(f"🌍 Total Episode {total_episode}")
+        print(f"==============================")
+        # ---------- 上层决策 ----------
+        # 修复：添加 imgs 参数
+        d_steps = 0
+        d_imgs = []  # 添加图像列表
+        d_obs_img, d_obs_tensor = env.get_img(d_steps, d_imgs)  # 传入两个参数
+        d_robot_state = env.get_robot_state()
+        d_obs = (d_obs_tensor, d_robot_state)
+        
+        # 调试：打印输入形状和值范围
+        print(f"📊 d_obs_tensor shape: {d_obs_tensor.shape}, range: [{d_obs_tensor.min():.3f}, {d_obs_tensor.max():.3f}]")
+        print(f"📊 d_robot_state shape: {len(d_robot_state) if isinstance(d_robot_state, list) else d_robot_state.shape}")
+        
+        decision_dict = hppo_agent.choose_action(
+            episode_num=total_episode,
+            obs=d_obs,
+            x_graph=d_robot_state
+        )
+
+        # decision 来自第1个离散输出
+        decision = int(decision_dict['discrete_action'][0])
+        print(f"上层决策 decision = {decision} (0=抓取, 1=爬梯)")
+        decision_catch_success = catch_success
+        decision_reward = (5.0 if (decision == 0 and not decision_catch_success) else
+                   -15.0 if (decision == 0 and decision_catch_success) else
+                   10.0 if (decision == 1 and decision_catch_success) else
+                   -10.0)
+
+
+        if decision == 0:
+            print("🟢 进入【抓取训练阶段】")
+            # catch_success由上一轮保持，不重置（除非抬腿完成后）
+
+            # 直接使用外层的episode_num，不用for循环
+            print(f"<<<<<<<<<抓取阶段动作计数 {episode_num}")  # 打印当前抓取阶段计数
+            env.reset()
+            env.wait(500)  # 等待500ms
+            imgs = []  # 初始化图像列表
+            steps = 0  # 初始化步数
+            return_all = 0  # 初始化总奖励
+            obs_img, obs_tensor = env.get_img(steps, imgs)  # 获取初始图像和图像张量
+            # log_writer.add(obs_img=obs_img, steps=steps)
+            robot_state = env.get_robot_state()
+            # print(f'robot_state: {robot_state}')
+            # print(f'robot_state_len: {len(robot_state)}')
+            print("____________________")  # 打印初始状态
+            # 记录上一次实际发送到环境的动作（用于离散=0时保持不变）
+            prev_shoulder_action = 0.0
+            prev_arm_action = 0.0
+            prev_distance = None
+            catch_loss_discrete = 0
+            catch_loss_continuous = 0
+            while True:
+                    # print(f'总周期{total_episode}，第{steps}步')
+                    ppo_state = [robot_state[1], robot_state[0], robot_state[5], robot_state[4]]  # 将机器人状态转换为ppo状态
+                    # log_writer.add(ppo_state=ppo_state, steps=steps)
+                    obs = (obs_tensor, robot_state)
+                    # log_writer.add(obs=obs, steps=steps)
+                    # 将机器人状态转换为张量
+                    # x_graph = torch.tensor(robot_state, dtype=torch.float32).to(device)
+                    # x_graph = torch.tensor(robot_state, dtype=torch.float32).unsqueeze(1).to(device)  # 添加维度
+                    # 输入次数、状态，选择动作
+
+                    dict = hppo_agent.choose_action(episode_num=total_episode,
+                                                    obs=obs,
+                                                    x_graph=robot_state)
+
+                    d_action = dict['discrete_action']
+
+                    action_shoulder = dict['continuous_action'][0]
+                    action_arm = dict['continuous_action'][1]
+                    log_prob_shoulder = dict['continuous_log_prob'][0]
+                    log_prob_arm = dict['continuous_log_prob'][1]
+                    value = dict['value']
+
+
+                    d1 = float(d_action[1])
+                    d2 = float(d_action[2])
+                    cur_shoulder = float(action_shoulder.item())
+                    cur_arm = float(action_arm.item())
+                    # 若离散为0，则保持上一时刻指令
+                    masked_shoulder = prev_shoulder_action if int(d1) == 0 else cur_shoulder
+                    masked_arm = prev_arm_action if int(d2) == 0 else cur_arm
+                    print(
+                        f'第{total_episode}总周期，第{steps}步, 离散数值：(决策{int(d_action[0])},抓取{int(d1)}/{int(d2)}), 连续: ({action_shoulder.item():.4f},{action_arm.item():.4f}), 实际: ({masked_shoulder:.4f},{masked_arm:.4f})')
+
+
+                    gps1, gps2, gps3, gps4, foot_gps1 = env.print_gps()  # 获取GPS位置
+                    if steps >= 19:  # 如果步数大于等于19
+                        catch_flag = 1.0  # 抓取器状态为1.0
+                    else:
+                        catch_flag = 0.0  # 抓取器状态为0.0
+                    img_name = "img" + str(steps) + ".png"  # 图像名称
+                    # print("action:", a)
+                    # 执行一步动作
+                    next_state, reward, done, good, goal, count = env.step(
+                        robot_state,
+                        masked_shoulder,
+                        masked_arm,
+                        steps,
+                        catch_flag,
+                        gps1,
+                        gps2,
+                        gps3,
+                        gps4,
+                        img_name
+                    )
+                    # 更新上一时刻动作
+                    prev_shoulder_action = masked_shoulder
+                    prev_arm_action = masked_arm
+                    print(f'catch_flag: {catch_flag}')
+                    print(f'done: {done}')
+
+                    gps1, _, _, _, _ = env.print_gps()
+                    # 安全检查：确保gps1有足够的元素
+                    if len(gps1) < 3:
+                        print(f"警告：gps1长度不足 ({len(gps1)} < 3)，使用默认值")
+                        dx = 0.0
+                        dy = 0.0
+                    else:
+                        dx = gps_goal[0] - gps1[1]
+                        dy = gps_goal[1] - gps1[2]
+                    current_distance = (dx ** 2 + dy ** 2) ** 0.5
+
+                    # 距离变化奖励（鼓励靠近目标）
+                    success_flag1 = env.darwin.get_touch_sensor_value('grasp_L1_2')
+                    if prev_distance is not None:
+                        distance_reward = (prev_distance - current_distance) * 15.0  # 增加距离奖励权重
+                    else:
+                        distance_reward = -current_distance  # 初始奖励
+
+                        # 组合奖励
+                        prev_distance = current_distance  # 更新
+
+                    # 添加距离奖励：越接近目标奖励越高
+                    proximity_reward = max(0, (0.5 - current_distance) * 5.0)  # 距离小于0.5时给额外奖励
+
+                    # 动作程度奖惩
+                    action_magnitude = (abs(cur_shoulder) + abs(cur_arm)) / 2.0
+                    inactivity_penalty = -0.2 if action_magnitude < 0.05 else 0.0
+                    if int(d1) == 0 and int(d2) == 0:
+                        inactivity_penalty += -0.3
+                    large_action_penalty = -0.05 * (abs(cur_shoulder) > 0.9 or abs(cur_arm) > 0.9)
+
+                    # --- 合并奖励 ---
+                    reward = distance_reward + proximity_reward + inactivity_penalty + large_action_penalty - 0.5 * steps
+
+                    all_grasp_sensors = [
+                        env.darwin.get_touch_sensor_value('grasp_L1'),
+                        env.darwin.get_touch_sensor_value('grasp_L1_1'),
+                        env.darwin.get_touch_sensor_value('grasp_L1_2'),
+                        env.darwin.get_touch_sensor_value('grasp_R1'),
+                        env.darwin.get_touch_sensor_value('grasp_R1_1'),
+                        env.darwin.get_touch_sensor_value('grasp_R1_2')
+                    ]
+                    left_sensors = all_grasp_sensors[0:3]
+                    right_sensors = all_grasp_sensors[3:6]
+                    left_any = any(left_sensors)
+                    right_any = any(right_sensors)
+                    # 抓取成功：左右两侧都有传感器触发
+                    success_flag1 = 1 if (left_any and right_any) else 0
+
+                    if success_flag1 == 1:  # 抓到了
+                        # 用你前面算好的 current_distance 即可
+                        if current_distance <= 0.04:  # 4 cm 容忍
+                            reward += 30
+                            print("✅ 抓到目标梯级，发放大奖励！")
+                            catch_success = True  # 记录抓取成功
+                        else:
+                            reward -= 15  # 抓错梯子，无大奖励
+                            print("⚠️  抓到非目标梯级，无大奖励")
+                    if done == 1 and steps < 6 and success_flag1 != 1:
+                        print("错误抓取！给予较大惩罚！")
+                        reward -= 10
+                    if done == 1 and steps >= 6 and success_flag1 != 1:
+                        print("错误抓取！给予较大惩罚！")
+                        reward -= 10
+                    if done == 1 and steps <= 2 and success_flag1 != 1:
+                        print("因环境不稳定导致无效数据，跳过此步骤！！！")
+                        break
+                    return_all = return_all + reward  # 总奖励为当前奖励加上之前的总奖励
+                    steps += 1  # 步数加1
+                    next_obs_img, next_obs_tensor = env.get_img(steps, imgs)  # 获取下一个图像和图像张量
+                    next_obs = [next_obs_img, next_state]
+                    # print('获取下一个状态更新完毕')
+                    # 可以修改reward值让其训练速度加快
+                    if good == 1:  # 如果good为1
+                        hppo_agent.store_transition(
+                            state=[obs_img, robot_state, robot_state],
+                            discrete_action=d_action,
+                            continuous_action=dict['continuous_action'],
+                            reward=reward,
+                            next_state=[next_obs_img, next_state, next_state],
+                            done=done,
+                            value=value,
+                            discrete_log_prob=dict['discrete_log_prob'],
+                            continuous_log_prob=dict['continuous_log_prob']
+                        )
+                    robot_state = env.get_robot_state()  # 获取机器人状态
+
+                    obs_tensor = next_obs_tensor  # 更新图像张量
+                    # if temp < 5000:  # 如果经验回放缓存小于3000
+                    if done == 1:  # 只有在当前决策周期结束后才学习
+                        if goal == 1:  # 如果达到目标
+                            print("goal = 1")
+                            save_path = os.path.join(catch_checkpoint_dir, f"single_hppo_{total_episode}.ckpt")
+                            checkpoint = {
+                                'policy': hppo_agent.policy.state_dict(),
+                                'optimizer_hppo': hppo_agent.optimizer.state_dict(),
+                                'episode': total_episode
+                            }
+                            torch.save(checkpoint, save_path)
+                        # print("11111111111111111111111111111111111111111-303")
+                        # loss_shoulder = ppo_shoulder.learn(action_type='shoulder')
+                        # print("22222222222222222222222222222222222222222-305")
+                        # loss_arm = ppo_arm.learn(action_type='arm')
+                        # # 学习离散HPPO
+                        # loss_hppo = hppo_switch_catch.learn()
+                        
+                        # 单智能体统一学习时机
+                        training_manager.increment_shared()
+                        if training_manager.should_learn_shared():
+                            loss_d, loss_c = hppo_agent.learn()
+                            catch_loss_discrete, catch_loss_continuous = loss_d, loss_c
+                            loss1, loss2 = loss_d, loss_c
+                            print(f'【单智能体学习-抓取阶段】{training_manager.get_status()} | loss_discrete: {loss1:.6f}, loss_continuous: {loss2:.6f}')
+                        else:
+                            # 累积经验但不学习
+                            print(f'【单智能体累积经验-抓取阶段】{training_manager.get_status()}')
+                            loss1, loss2 = 0, 0
+
+                        if total_episode % 100 == 0 and total_episode != 0:  # 每100个总周期保存一次模型
+                            save_path = os.path.join(catch_checkpoint_dir, f"single_hppo_{total_episode}.ckpt")
+                            checkpoint = {
+                                'policy': hppo_agent.policy.state_dict(),
+                                'optimizer_hppo': hppo_agent.optimizer.state_dict(),
+                                'episode': total_episode
+                            }
+                            torch.save(checkpoint, save_path)
+
+                    success_flag1 = env.darwin.get_touch_sensor_value('grasp_L1_2')
+
+                    if catch_flag == 1.0 or done == 1: # 如果抓取器状态为1.0或完成
+                        env.wait(100)
+                        imgs = []
+                        steps = 0
+                        episode_num = episode_num + 1
+                        
+                        # 【新增】如果这个episode中成功抓取了，则让decision重新判断
+                        if success_flag1 == 1 and current_distance <= 0.04:
+                            print("【抓取成功】保持机器人抓取状态，准备进行decision的下一步判断...")
+                            env.wait(200)  # 等待机器人稳定
+                            need_reset_after_cycle = False
+                            break  # 退出抓取循环
+    
+                        break
+            log_writer.log_cycle(
+                log_file_latest_single,
+                episode_num=total_episode,
+                action_type='抓取',
+                decision_reward=decision_reward,
+                catch_reward=return_all,
+                total_reward=return_all + decision_reward,
+                loss_discrete=catch_loss_discrete,
+                loss_continuous=catch_loss_continuous,
+                total_episode_num=total_episode,
+                phase_episode_num=episode_num,
+            )
+            if not need_reset_after_cycle:
+                catch_success = True
+        else:
+            print("🟢 进入【抬腿训练阶段】")
+            # 只有抓取成功后才允许抬腿；未抓取成功则跳过本轮抬腿
+            if not catch_success:
+                print("⚠️ 未检测到抓取成功，本轮跳过抬腿训练。")
+                log_writer.log_cycle(
+                    log_file_latest_single,
+                    episode_num=total_episode,
+                    action_type='抬腿-跳过',
+                    decision_reward=decision_reward,
+                    total_reward=decision_reward,
+                    loss_discrete=0,
+                    loss_continuous=0,
+                    total_episode_num=total_episode,
+                    phase_episode_num=tai_episoid,
+                )
+                if training_manager is not None:
+                    training_manager.increment_shared()
+                    if training_manager.should_learn_shared():
+                        loss_discrete, loss_continuous = hppo_agent.learn()
+                        print(f"【单智能体学习-跳过抬腿阶段】{training_manager.get_status()} | loss_discrete: {loss_discrete:.6f}, loss_continuous: {loss_continuous:.6f}")
+                _reset_env_for_next_decision(env, 500)
+                total_episode += 1
+                continue
+            # if success_flag1 == 1:
+            #     success_catch += 1
+            #     log_writer_catch.add(success_catch=success_catch)
+            #     print("success_catch:", success_catch)
+            #     print("抓取成功，开始抬腿训练...")
+            #     total_episode = i
+            print("tai_episoid:", tai_episoid)
+            PPO_tai_episoid(existing_env=env, total_episode=total_episode, episode=tai_episoid,
+                            log_writer_tai=log_writer, log_file_latest_tai=log_file_latest_single,
+                            catch_success=catch_success, hppo_agent=hppo_agent, training_manager=training_manager,
+                            decision_reward=decision_reward,
+                            discrete_indices=(3, 4, 5), continuous_indices=(2, 3, 4))
+            tai_episoid += 1
+            
+            # 抬腿执行完毕，重置环境和抓取标记，准备下一个完整循环
+            catch_success = False
+            need_reset_after_cycle = False
+
+        if need_reset_after_cycle:
+            _reset_env_for_next_decision(env, 500)
+
+        total_episode += 1
+
     # 如果整个训练过程结束，返回抓取成功状态和环境实例
     return False, env

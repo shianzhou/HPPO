@@ -70,10 +70,10 @@ class SupervisorRobot:
         self.robot.step(self.timestep)
         isremove = True
         while True:
-            with open('D:\\project_MultiAgent_h\\python_scripts\\resetFlag.txt', 'r') as file:
+            with open('E:\\project_MultiAgent_h\\python_scripts\\resetFlag.txt', 'r') as file:
                 flag = file.read()
                 if flag == '0':
-                    with open('D:\\project_MultiAgent_h\\python_scripts\\resetFlag.txt', 'r+') as file:
+                    with open('E:\\project_MultiAgent_h\\python_scripts\\resetFlag.txt', 'r+') as file:
                         file.write('1')
                     self.robot.simulationResetPhysics()
                     self.reset()
