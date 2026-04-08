@@ -431,7 +431,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                         break
             log_writer.log_cycle(
                 log_file_latest_single,
-                episode_num=episode_num,
+                episode_num=total_episode,
                 action_type='抓取',
                 decision_reward=decision_reward,
                 catch_reward=return_all,

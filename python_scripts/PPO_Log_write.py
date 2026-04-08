@@ -52,8 +52,10 @@ class Log_write:
     def add_cycle_record(self, episode_num=None, action_type=None, decision_reward=None,
                          catch_reward=None, tai_reward=None, total_reward=None,
                          loss_discrete=None, loss_continuous=None, **extra_fields):
+        total_episode_num = extra_fields.get('total_episode_num')
+        canonical_episode_num = total_episode_num if total_episode_num is not None else episode_num
         record = {
-            'episode_num': self._normalize_scalar(episode_num),
+            'episode_num': self._normalize_scalar(canonical_episode_num),
             'action_type': action_type,
             'decision_reward': self._normalize_scalar(decision_reward),
             'catch_reward': self._normalize_scalar(catch_reward),
