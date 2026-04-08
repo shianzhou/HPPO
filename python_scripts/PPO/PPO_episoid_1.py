@@ -1,16 +1,10 @@
 # 测试
 import torch
-from python_scripts.PPO.PPO_PPOnet_2 import PPO2
-from python_scripts.PPO.PPO_PPOnet import PPO
-from python_scripts.PPO.hppo import HPPO
-from python_scripts.PPO.Replay_memory import ReplayMemory
-from python_scripts.PPO.Replay_memory_2 import ReplayMemory_2
 from python_scripts.PPO.PPO_episoid_2_1 import PPO_tai_episoid
 from python_scripts.Webots_interfaces import Environment
 from python_scripts.PPO.hppo_01 import HPPO as hppo
 # from Data_fusion import data_fusion
-from typing import Optional
-from python_scripts.Project_config import path_list, gps_goal, gps_goal1, device
+from python_scripts.Project_config import path_list, gps_goal
 from python_scripts.PPO_Log_write import Log_write
 
 
@@ -23,55 +17,30 @@ import re
 # ===== 方案A: 训练管理器（同步三个模型的更新频率） =====
 class TrainingManager:
     """
-    统一管理三个模型（抓取、抬腿、决策）的训练节奏，防止梯度聚集和模型冲突。
-    核心思想：不同模型以不同频率进行学习，避免同时大量参数更新。
+    单智能体学习节奏管理。
+    核心思想：抓取和抬腿都先积累经验，再按统一间隔学习。
     """
     def __init__(self):
-        self.catch_episodes = 0      # 抓取episodes计数
-        self.tai_episodes = 0        # 抬腿episodes计数
-        self.decision_episodes = 0   # 决策episodes计数
+        self.shared_episodes = 0
         
-        # 【关键参数】控制各模型的学习频率
-        self.catch_learn_interval = 3    # 每3个抓取episodes学习一次（抓取最频繁）
-        self.tai_learn_interval = 2      # 每2个抬腿episodes学习一次（中等频率）
-        self.decision_learn_interval = 5 # 每5个决策episodes学习一次（最稀疏）
+        # 统一学习间隔，避免同一智能体在不同阶段过于频繁更新
+        self.shared_learn_interval = 3
         
         print("【训练管理器初始化】")
-        print(f"  抓取学习间隔: {self.catch_learn_interval}个episodes")
-        print(f"  抬腿学习间隔: {self.tai_learn_interval}个episodes")
-        print(f"  决策学习间隔: {self.decision_learn_interval}个episodes")
+        print(f"  单智能体学习间隔: {self.shared_learn_interval}个episodes")
     
-    def should_learn_catch(self) -> bool:
-        """决定是否让抓取模型学习（降低频率防止梯度聚集）"""
-        result = (self.catch_episodes % self.catch_learn_interval == 0) and (self.catch_episodes > 0)
+    def should_learn_shared(self) -> bool:
+        """决定是否执行单智能体学习"""
+        result = (self.shared_episodes % self.shared_learn_interval == 0) and (self.shared_episodes > 0)
         return result
     
-    def should_learn_tai(self) -> bool:
-        """决定是否让抬腿模型学习（更新频率较低，批量大）"""
-        result = (self.tai_episodes % self.tai_learn_interval == 0) and (self.tai_episodes > 0)
-        return result
-    
-    def should_learn_decision(self) -> bool:
-        """决定是否让决策模型学习（最稀疏的更新）"""
-        result = (self.decision_episodes % self.decision_learn_interval == 0) and (self.decision_episodes > 0)
-        return result
-    
-    def increment_catch(self):
-        """抓取episode计数加1"""
-        self.catch_episodes += 1
-    
-    def increment_tai(self):
-        """抬腿episode计数加1"""
-        self.tai_episodes += 1
-    
-    def increment_decision(self):
-        """决策episode计数加1"""
-        self.decision_episodes += 1
+    def increment_shared(self):
+        """单智能体episode计数加1"""
+        self.shared_episodes += 1
     
     def get_status(self) -> str:
         """获取当前训练状态"""
-        return (f"[TrainingManager] Catch:{self.catch_episodes} | "
-                f"Tai:{self.tai_episodes} | Decision:{self.decision_episodes}")
+        return f"[TrainingManager] Shared:{self.shared_episodes}"
 
 
 def _ensure_dir(path: str) -> None:
@@ -95,44 +64,23 @@ def _next_log_file(dir_path: str, prefix: str) -> str:
                 continue
     return os.path.join(dir_path, f"{prefix}_{max_n + 1}.json")
 
-def _latest_catch_ckpt(dir_path: str):
-    files = glob.glob(os.path.join(dir_path, "catch_hppo_*.ckpt"))
+def _latest_single_ckpt(dir_path: str):
+    """加载目录中最新的 single_hppo_*.ckpt。"""
+    files = glob.glob(os.path.join(dir_path, "single_hppo_*.ckpt"))
     if not files:
         return None, 0
-    def _num(f: str) -> int:
-        m = re.search(r"catch_hppo_(\d+)\.ckpt$", os.path.basename(f))
-        return int(m.group(1)) if m else -1
-    selected = max(files, key=_num)
-    return selected, _num(selected)
 
-def _latest_tai_ckpt(dir_path: str):
-    files = glob.glob(os.path.join(dir_path, "tai_agent_*_*.ckpt"))
-    if not files:
-        return None, 0, 0
-    def _nums(f: str):
-        b = os.path.basename(f).replace('.ckpt','')
-        parts = b.split('_')
-        try:
-            return int(parts[-2]), int(parts[-1])
-        except Exception:
-            return (0, 0)
-    selected = max(files, key=_nums)
-    total, ep = _nums(selected)
-    return selected, total, ep
-
-def _latest_decision_ckpt(dir_path: str):
-    files = glob.glob(os.path.join(dir_path, "decision_hppo_*.ckpt"))
-    if not files:
-        return None, 0
     def _num(f: str) -> int:
-        m = re.search(r"decision_hppo_(\d+)\.ckpt$", os.path.basename(f))
-        return int(m.group(1)) if m else -1
+        b = os.path.basename(f)
+        m_new = re.search(r"single_hppo_(\d+)\.ckpt$", b)
+        return int(m_new.group(1)) if m_new else -1
+
     selected = max(files, key=_num)
     return selected, _num(selected)
 
 # ===== 模型加载工具函数（提炼提高可读性） =====
-def load_catch_model(model_path: str, hppo_agent, catch_dir: str) -> int:
-    """加载抓取模型，优先使用指定路径；否则从目录中选择最新。返回 episode_start。"""
+def load_single_model(model_path: str, hppo_agent, ckpt_dir: str) -> int:
+    """加载单智能体模型，优先指定路径；否则自动加载目录最新。"""
     episode_start = 0
     if model_path:
         try:
@@ -141,7 +89,7 @@ def load_catch_model(model_path: str, hppo_agent, catch_dir: str) -> int:
                 hppo_agent.policy.load_state_dict(ckpt['policy'])
                 if 'optimizer_hppo' in ckpt and hppo_agent.optimizer:
                     hppo_agent.optimizer.load_state_dict(ckpt['optimizer_hppo'])
-                print(f"从指定模型加载: {model_path}，模型加载成功！")
+                print(f"从指定模型加载: {model_path}，单智能体模型加载成功！")
                 try:
                     episode_start = int(os.path.basename(model_path).split('_')[-1].split('.')[0])
                     print(f"从指定模型加载: {model_path}，从周期 {episode_start} 继续训练")
@@ -149,14 +97,14 @@ def load_catch_model(model_path: str, hppo_agent, catch_dir: str) -> int:
                     pass
             else:
                 hppo_agent.policy.load_state_dict(ckpt)
-                print(f"从指定模型加载: {model_path}，模型加载成功！(旧格式)")
+                print(f"从指定模型加载: {model_path}，单智能体模型加载成功！")
         except Exception as e:
             print(f"指定模型加载失败: {e}")
             episode_start = 0
         return episode_start
 
     # 未指定路径，查找目录最新
-    selected_model, episode_start = _latest_catch_ckpt(catch_dir)
+    selected_model, episode_start = _latest_single_ckpt(ckpt_dir)
     if selected_model:
         try:
             ckpt = torch.load(selected_model)
@@ -164,54 +112,17 @@ def load_catch_model(model_path: str, hppo_agent, catch_dir: str) -> int:
                 hppo_agent.policy.load_state_dict(ckpt['policy'])
                 if 'optimizer_hppo' in ckpt and hppo_agent.optimizer:
                     hppo_agent.optimizer.load_state_dict(ckpt['optimizer_hppo'])
-                print("抓取模型加载成功！")
+                print("单智能体模型加载成功！")
             else:
                 hppo_agent.policy.load_state_dict(ckpt)
-                print("抓取模型加载成功！(旧格式)")
+                print("单智能体模型加载成功！")
         except Exception as e:
-            print(f"抓取模型加载失败: {e}")
+            print(f"单智能体模型加载失败: {e}")
             episode_start = 0
     else:
-        print("未找到已保存的抓取模型，从头开始训练")
+        print("未找到已保存的单智能体模型，从头开始训练")
         episode_start = 0
     return episode_start
-
-def load_tai_model(tai_agent, tai_dir: str, default_episode: int = 1) -> int:
-    """加载抬腿模型，仅从新目录选择最新。返回抬腿起始回合。"""
-    selected_tai, _, ep = _latest_tai_ckpt(tai_dir)
-    if selected_tai:
-        print(f"找到最新抬腿模型: {selected_tai}，抬腿周期: {ep}")
-        try:
-            ckpt = torch.load(selected_tai)
-            if isinstance(ckpt, dict) and 'policy_tai' in ckpt:
-                tai_agent.policy.load_state_dict(ckpt['policy_tai'])
-                if 'optimizer_tai' in ckpt and tai_agent.optimizer:
-                    tai_agent.optimizer.load_state_dict(ckpt['optimizer_tai'])
-            print("抬腿模型加载成功！")
-        except Exception as e:
-            print(f"抬腿模型加载失败: {e}")
-        return ep
-    else:
-        print("未找到已保存的抬腿模型，从头开始训练")
-        return default_episode
-
-def load_decision_model(decision_agent, dec_dir: Optional[str]) -> int:
-    """可选加载决策模型（若目录存在且有文件）。返回起始决策回合编号。"""
-    if not dec_dir:
-        return 0
-    latest_dec, dec_ep = _latest_decision_ckpt(dec_dir)
-    if latest_dec:
-        try:
-            ckpt = torch.load(latest_dec)
-            if isinstance(ckpt, dict) and 'policy' in ckpt:
-                decision_agent.policy.load_state_dict(ckpt['policy'])
-                if 'optimizer' in ckpt and decision_agent.optimizer:
-                    decision_agent.optimizer.load_state_dict(ckpt['optimizer'])
-                print(f"决策模型加载成功: {latest_dec}")
-            return dec_ep
-        except Exception as e:
-            print(f"决策模型加载失败: {e}")
-    return 0
 
 
 def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
@@ -224,9 +135,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
     hppo_agent = hppo(
         num_servos=6,
         node_num=19,
-        env_information=None,
-        num_discrete_actions=6,
-        num_continuous_actions=5
+        env_information=None
     )
 
     # ===== 日志写入器 =====
@@ -239,9 +148,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
 
     # ===== 模型保存目录（统一，使用配置的新路径） =====
     catch_checkpoint_dir = path_list['model_path_catch_PPO_h']
-    decision_checkpoint_dir = path_list['model_path_decision_PPO_h']
     _ensure_dir(catch_checkpoint_dir)
-    _ensure_dir(decision_checkpoint_dir)
 
     # ===== 日志文件（自动递增编号） =====
     # 确保日志目录存在
@@ -257,17 +164,11 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
     print(f"将使用新决策的日志目录: {log_file_latest_decision}")
 
     # ===== 模型加载（函数化） =====
-    episode_start = load_catch_model(model_path, hppo_agent, path_list['model_path_catch_PPO_h'])
-
-    tai_episoid = 1
-    decision_episode = 0
+    episode_start = load_single_model(model_path, hppo_agent, path_list['model_path_catch_PPO_h'])
 
     # ===== 索引与计数（集中管理） =====
     episode_num = episode_start           # 抓取阶段起始轮次
-    # 决策层起始轮次（从决策模型文件名恢复，若不存在则为0）
-    decision_episode = decision_episode if 'decision_episode' in locals() else 0
-    total_episode = decision_episode      # 总轮次计数
-    success_catch = 0                     # 抓取成功次数
+    total_episode = 0                     # 总轮次计数
     catch_success = False                 # 跨episode标记：上一轮是否抓取成功
 
     # ===============================
@@ -296,6 +197,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
         print(f"📊 d_robot_state shape: {len(d_robot_state) if isinstance(d_robot_state, list) else d_robot_state.shape}")
         
         decision_dict = hppo_agent.choose_action(
+            episode_num=total_episode,
             obs=d_obs,
             x_graph=d_robot_state
         )
@@ -459,9 +361,6 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                     if done == 1 and steps <= 2 and success_flag1 != 1:
                         print("因环境不稳定导致无效数据，跳过此步骤！！！")
                         break
-                    reward -= steps * 0.5
-                    return_all = return_all + reward
-
                     return_all = return_all + reward  # 总奖励为当前奖励加上之前的总奖励
                     steps += 1  # 步数加1
                     next_obs_img, next_obs_tensor = env.get_img(steps, imgs)  # 获取下一个图像和图像张量
@@ -488,7 +387,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                     if episode_num >= 0 and done == 1:  # 只有在buffer中存满了数据才会学习
                         if goal == 1:  # 如果达到目标
                             print("goal = 1")
-                            save_path = os.path.join(catch_checkpoint_dir, f"catch_hppo_{episode_num}.ckpt")
+                            save_path = os.path.join(catch_checkpoint_dir, f"single_hppo_{episode_num}.ckpt")
                             checkpoint = {
                                 'policy': hppo_agent.policy.state_dict(),
                                 'optimizer_hppo': hppo_agent.optimizer.state_dict(),
@@ -502,16 +401,16 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                         # # 学习离散HPPO
                         # loss_hppo = hppo_switch_catch.learn()
                         
-                        # 【方案A】使用训练管理器控制学习频率
-                        training_manager.increment_catch()
-                        if training_manager.should_learn_catch():
+                        # 单智能体统一学习时机
+                        training_manager.increment_shared()
+                        if training_manager.should_learn_shared():
                             loss_d, loss_c = hppo_agent.learn()
                             loss1, loss2 = loss_d, loss_c
-                            print(f'【抓取模型学习】{training_manager.get_status()} | loss_discrete: {loss1:.6f}, loss_continuous: {loss2:.6f}')
+                            print(f'【单智能体学习-抓取阶段】{training_manager.get_status()} | loss_discrete: {loss1:.6f}, loss_continuous: {loss2:.6f}')
                             log_writer_catch.add_loss_hppo_catch(loss1, loss2)
                         else:
                             # 累积经验但不学习
-                            print(f'【抓取模型累积经验】{training_manager.get_status()}')
+                            print(f'【单智能体累积经验-抓取阶段】{training_manager.get_status()}')
                             loss1, loss2 = 0, 0
                         # 立即落盘，避免仅在回合结束保存导致当轮loss缺失
                         try:
@@ -520,7 +419,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                             print(f"保存抓取loss到日志失败: {_e}")
 
                         if episode_num % 100 == 0 and episode_num != 0:  # 每100步保存一次模型
-                            save_path = os.path.join(catch_checkpoint_dir, f"catch_hppo_{episode_num}.ckpt")
+                            save_path = os.path.join(catch_checkpoint_dir, f"single_hppo_{episode_num}.ckpt")
                             checkpoint = {
                                 'policy': hppo_agent.policy.state_dict(),
                                 'optimizer_hppo': hppo_agent.optimizer.state_dict(),
@@ -567,7 +466,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             print("tai_episoid:", tai_episoid)
             PPO_tai_episoid(existing_env=env, total_episode=total_episode, episode=tai_episoid,
                             log_writer_tai=log_writer_tai, log_file_latest_tai=log_file_latest_tai,
-                            catch_success=catch_success, tai_agent=hppo_agent, training_manager=training_manager,
+                            catch_success=catch_success, hppo_agent=hppo_agent, training_manager=training_manager,
                             discrete_indices=(3, 4, 5), continuous_indices=(2, 3, 4))
             tai_episoid += 1
             

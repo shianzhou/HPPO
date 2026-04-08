@@ -1,15 +1,11 @@
 import math
 import os
 import numpy as np
-import torch
 from python_scripts.Webots_interfaces import Environment
-from python_scripts.Project_config import gps_goal1,path_list
-from python_scripts.PPO.hppo_01 import HPPO as tai_hppo
+from python_scripts.Project_config import gps_goal1
+from python_scripts.PPO.hppo_01 import HPPO as hppo
 #from python_scripts.PPO.utils.sensor_utils import wait_for_sensors_stable, reset_environment
 
-# 统一的模型保存目录（仅使用配置路径）
-tai_checkpoint_dir = path_list['model_path_tai_PPO_h']
-os.makedirs(tai_checkpoint_dir, exist_ok=True)
 def validate_and_clean_data(data, default_value=0.0):
     """验证并清理数据中的NaN和Inf值"""
     if isinstance(data, (list, tuple)):
@@ -24,7 +20,7 @@ def validate_and_clean_data(data, default_value=0.0):
     else:
         return data
 def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_tai=None, log_file_latest_tai=None,
-                    catch_success=False, tai_agent=None, training_manager=None,
+                    catch_success=False, hppo_agent=None, training_manager=None,
                     discrete_indices=(0, 1, 2), continuous_indices=(0, 1, 2)):
 
     # 如果没有抓取成功，直接跳过抬腿阶段
@@ -33,8 +29,8 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
         return
 
     # 智能体实例化（优先使用外部传入的模型）
-    if tai_agent is None:
-        tai_agent = tai_hppo(num_servos=3, node_num=19, env_information=None)
+    if hppo_agent is None:
+        hppo_agent = hppo(num_servos=6, node_num=19, env_information=None)
 
     # 使用已有的环境实例或创建新的
     if existing_env is not None:
@@ -78,9 +74,9 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
         robot_state = validate_and_clean_data(robot_state)
         # 将机器人状态转换为PPO状态，与PPO_episoid_1.py保持一致
         ppo_state = [robot_state[1], robot_state[0], robot_state[5], robot_state[4]]
-        # 选择动作 - 使用tai_agent替代三个独立的PPO2智能体
+        # 选择动作 - 单智能体输出后按索引切片到抬腿子动作
 
-        tai_dict = tai_agent.choose_action(episode_num=episode,
+        tai_dict = hppo_agent.choose_action(episode_num=episode,
                                        obs=[obs_img, robot_state],
                                        x_graph=robot_state)
 
@@ -146,7 +142,7 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
         log_writer_tai.add_value_tai(value_scalar, value_scalar, value_scalar)
 
         print("第", steps + 1, "步")
-        print(f"【tai_agent门控控制】离散动作: [{discrete_upper}, {discrete_lower}, {discrete_ankle}]")
+        print(f"【hppo_agent门控控制】离散动作: [{discrete_upper}, {discrete_lower}, {discrete_ankle}]")
         print(f"【原始连续动作】LegUpper: {action_LegUpper_original:.4f}, LegLower: {action_LegLower_original:.4f}, Ankle: {action_Ankle_original:.4f}")
         print(f"【最终执行动作】LegUpper: {action_LegUpper_exec:.4f}, LegLower: {action_LegLower_exec:.4f}, Ankle: {action_Ankle_exec:.4f}")
         
@@ -172,7 +168,6 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
             gps_values[4], gps_values[0], gps_values[1], gps_values[2], gps_values[3],
         )
         
-        # ========== 奖励计算（统一使用自定义reward） ==========
         reward = 0.0
         if count == 1:
             x1 = gps_goal1[0] - gps_values[4][1]  # 目标x坐标 - 当前脚部GPS x坐标
@@ -240,8 +235,8 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
             print(f"  跳过无效样本：done={done}, steps={steps}, good={good}")
 
         if should_store:
-            # 使用tai_agent存储转移经验
-            tai_agent.store_transition(
+            # 使用同一个hppo_agent存储转移经验
+            hppo_agent.store_transition(
                 state=[obs_img, robot_state, robot_state],
                 discrete_action=tai_discrete_action_full,
                 continuous_action=tai_continuous_action_full,
@@ -262,28 +257,14 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
         if steps >= 20:
             done = 1
             
-        # 定期保存模型
-        if episode % 400 == 0 and done == 1:
-            save_path = os.path.join(tai_checkpoint_dir, f"tai_agent_{total_episode}_{episode}.ckpt")
-            print(f"保存模型到: {save_path}")
-            checkpoint = {
-                "episode": episode,
-                "policy_tai": tai_agent.policy.state_dict(),
-                "optimizer_tai": tai_agent.optimizer.state_dict()
-            }
-            torch.save(checkpoint, save_path)
-        
-        #学习过程
+        # 学习过程
         if episode > 0 and done == 1:
-            # 【方案A】使用训练管理器控制学习频率
             if training_manager is not None:
-                training_manager.increment_tai()
-                if training_manager.should_learn_tai():
-                    # ========== Loss 计算 ==========
-                    # 使用tai_agent进行学习，返回离散和连续两个损失
-                    loss_discrete, loss_continuous = tai_agent.learn()
+                training_manager.increment_shared()
+                if training_manager.should_learn_shared():
+                    loss_discrete, loss_continuous = hppo_agent.learn()
                     print("=" * 60)
-                    print(f"【抬腿模型学习】{training_manager.get_status()}")
+                    print(f"【单智能体学习-抬腿阶段】{training_manager.get_status()}")
                     print(f"【第 {episode} 回合训练完成】")
                     print(f"  累积奖励 (return_all): {return_all:.4f}")
                     print(f"  目标达成 (goal): {goal}")
@@ -297,17 +278,11 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
                         print(f"  Ankle 激活率: {gate_activation['ankle'] / gate_activation['steps']:.2%}")
                         print(f"  全关闭次数: {gate_activation['all_off']} / {int(gate_activation['steps'])}")
                     print("=" * 60)
-                    
-                    # 记录损失值
                 else:
-                    # 累积经验但不学习
-                    print(f"【抬腿模型累积经验】{training_manager.get_status()}")
+                    print(f"【单智能体累积经验-抬腿阶段】{training_manager.get_status()}")
                     loss_discrete, loss_continuous = 0, 0
             else:
-                # 如果没有training_manager，使用原始逻辑（向后兼容）
-                # ========== Loss 计算 ==========
-                # 使用tai_agent进行学习，返回离散和连续两个损失
-                loss_discrete, loss_continuous = tai_agent.learn()
+                loss_discrete, loss_continuous = hppo_agent.learn()
                 print("=" * 60)
                 print(f"【第 {episode} 回合训练完成】")
                 print(f"  累积奖励 (return_all): {return_all:.4f}")
@@ -322,8 +297,7 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
                     print(f"  Ankle 激活率: {gate_activation['ankle'] / gate_activation['steps']:.2%}")
                     print(f"  全关闭次数: {gate_activation['all_off']} / {int(gate_activation['steps'])}")
                 print("=" * 60)
-            
-            # 记录损失值
+
             total_loss = loss_discrete + loss_continuous
             log_writer_tai.add(loss=total_loss)
             log_writer_tai.add(loss_discrete=loss_discrete)
