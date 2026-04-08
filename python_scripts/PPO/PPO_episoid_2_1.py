@@ -23,7 +23,9 @@ def validate_and_clean_data(data, default_value=0.0):
         return data
     else:
         return data
-def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_tai=None, log_file_latest_tai=None, catch_success=False, tai_agent=None, training_manager=None):
+def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_tai=None, log_file_latest_tai=None,
+                    catch_success=False, tai_agent=None, training_manager=None,
+                    discrete_indices=(0, 1, 2), continuous_indices=(0, 1, 2)):
 
     # 如果没有抓取成功，直接跳过抬腿阶段
     if not catch_success:
@@ -82,10 +84,14 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
                                        obs=[obs_img, robot_state],
                                        x_graph=robot_state)
 
-        # 从tai_agent获取离散和连续动作
-        tai_discrete_action = tai_dict['discrete_action']  # [3] - 三个舵机的离散动作
-        tai_continuous_action = tai_dict['continuous_action']  # [3] - 三个舵机的连续动作
-        tai_continuous_log_prob = tai_dict['continuous_log_prob']  # [3] - 连续动作的对数概率
+        # 从统一智能体输出中按索引切片抬腿动作
+        tai_discrete_action_full = np.asarray(tai_dict['discrete_action'])
+        tai_continuous_action_full = np.asarray(tai_dict['continuous_action'])
+        tai_continuous_log_prob_full = np.asarray(tai_dict['continuous_log_prob'])
+
+        tai_discrete_action = tai_discrete_action_full[list(discrete_indices)]
+        tai_continuous_action = tai_continuous_action_full[list(continuous_indices)]
+        tai_continuous_log_prob = tai_continuous_log_prob_full[list(continuous_indices)]
         tai_value = tai_dict['value']  # 状态价值
 
         # 提取三个关节的连续动作和对应的离散动作
@@ -237,14 +243,14 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
             # 使用tai_agent存储转移经验
             tai_agent.store_transition(
                 state=[obs_img, robot_state, robot_state],
-                discrete_action=tai_discrete_action,
-                continuous_action=tai_continuous_action,
+                discrete_action=tai_discrete_action_full,
+                continuous_action=tai_continuous_action_full,
                 reward=reward,
                 next_state=[next_obs_img, robot_state, next_state],
                 done=done,
                 value=tai_value,
                 discrete_log_prob=tai_dict['discrete_log_prob'],
-                continuous_log_prob=tai_continuous_log_prob
+                continuous_log_prob=tai_continuous_log_prob_full
             )
             print(f"  已存储经验: reward={reward:.4f}")
                         
