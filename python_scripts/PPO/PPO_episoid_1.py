@@ -183,7 +183,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
         print(f"\n==============================")
         print(f"🌍 Total Episode {total_episode}")
         print(f"==============================")
-
+        env.reset()
         # ---------- 上层决策 ----------
         # 修复：添加 imgs 参数
         d_steps = 0
