@@ -9,11 +9,9 @@ from torch.distributions import Categorical
 from python_scripts.Project_config import device
 
 class MultiDiscreteActorCritic(nn.Module):
-    def __init__(self, num_servos, node_num, num_discrete_actions=None, num_continuous_actions=None):
+    def __init__(self, num_servos, node_num):
         super().__init__()
         self.num_servos = num_servos
-        self.num_discrete_actions = num_discrete_actions if num_discrete_actions is not None else num_servos
-        self.num_continuous_actions = num_continuous_actions if num_continuous_actions is not None else num_servos
         self.node_num = node_num
         # 图像特征提取
         self.conv1 = nn.Conv2d(1, 32, (5, 5), stride=(2, 2), padding=1)
@@ -29,15 +27,15 @@ class MultiDiscreteActorCritic(nn.Module):
         # 共享特征层
         self.fc4 = nn.Linear(300, 200)
         # 多舵机离散动作头
-        self.discrete_head = nn.Linear(200, self.num_discrete_actions * 2)  # 每个离散动作输出2个logit
+        self.discrete_head = nn.Linear(200, num_servos*2)  # 输出num_servos个logit
 
         #连续动作头，输出值是已知所有动作的参数(输出维度因为所有需要参数的二倍)
         self.continuous =nn.Sequential(
-            nn.Linear(200, self.num_continuous_actions),
+            nn.Linear(200, num_servos),
             nn.Tanh()  # Tanh激活函数将mu的范围限制在[-1, 1]
         )
 
-        self.actor_log_sigma = nn.Parameter(torch.zeros(self.num_continuous_actions)* 0.1)
+        self.actor_log_sigma = nn.Parameter(torch.zeros(num_servos)* 0.1)
 
         # Critic头
         self.critic = nn.Linear(200, 1)
@@ -84,7 +82,7 @@ class MultiDiscreteActorCritic(nn.Module):
         # discrete_probs = torch.sigmoid(discrete_logits)  # [num_servos]
         # 假设每个舵机有 2 种离散动作
         discrete_logits = discrete_logits + 0.01 * torch.randn_like(discrete_logits)
-        discrete_logits = discrete_logits.view(-1, self.num_discrete_actions, 2)
+        discrete_logits = discrete_logits.view(-1, self.num_servos, 2)
 
         discrete_probs = F.softmax(discrete_logits, dim=-1)  # 在最后一个维度（动作维度）应用 softmax
         discrete_dist = Categorical(probs=discrete_probs)
@@ -102,10 +100,8 @@ class MultiDiscreteActorCritic(nn.Module):
         return discrete_dist,continuous_dist,value
 
 class HPPO:
-    def __init__(self, num_servos, node_num, env_information=None, num_discrete_actions=None, num_continuous_actions=None):
+    def __init__(self, num_servos, node_num, env_information=None ):
         self.num_servos = num_servos
-        self.num_discrete_actions = num_discrete_actions if num_discrete_actions is not None else num_servos
-        self.num_continuous_actions = num_continuous_actions if num_continuous_actions is not None else num_servos
         self.node_num = node_num
         self.env_information = env_information
         self.device = device
@@ -122,12 +118,7 @@ class HPPO:
         self.lr_decay = 0.995  # 学习率衰减
         
         # 网络
-        self.policy = MultiDiscreteActorCritic(
-            num_servos,
-            node_num,
-            num_discrete_actions=self.num_discrete_actions,
-            num_continuous_actions=self.num_continuous_actions
-        ).to(device)
+        self.policy = MultiDiscreteActorCritic(num_servos, node_num).to(device)
         
         # 优化器 - 使用更保守的学习率
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.lr)
@@ -273,11 +264,19 @@ class HPPO:
 
         # 转换为张量并移动到设备
         batch_states = self.states  # 列表，每个元素是状态元组
-        # Categorical 需要 Long 索引
-        batch_discrete_actions = torch.tensor(self.discrete_actions, dtype=torch.long).to(self.device)
-        batch_continuous_actions = torch.tensor(self.continuous_actions, dtype=torch.float32).to(self.device)
-        batch_discrete_log_probs = torch.tensor(self.discrete_log_probs, dtype=torch.float32).to(self.device)
-        batch_continuous_log_probs = torch.tensor(self.continuous_log_probs, dtype=torch.float32).to(self.device)
+        # 先汇总为 numpy 数组，再转 tensor，避免 list[np.ndarray] 的慢路径告警
+        batch_discrete_actions = torch.as_tensor(
+            np.asarray(self.discrete_actions), dtype=torch.long, device=self.device
+        )
+        batch_continuous_actions = torch.as_tensor(
+            np.asarray(self.continuous_actions), dtype=torch.float32, device=self.device
+        )
+        batch_discrete_log_probs = torch.as_tensor(
+            np.asarray(self.discrete_log_probs), dtype=torch.float32, device=self.device
+        )
+        batch_continuous_log_probs = torch.as_tensor(
+            np.asarray(self.continuous_log_probs), dtype=torch.float32, device=self.device
+        )
 
         # 标准化优势
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
