@@ -1,3 +1,5 @@
+这是单智能体项目也就是一个HPPO智能体
+
 别忘了更改路径（需要更改路径的文件包括\controllers\new_ti_zi\new_ti_zi.py ,\python_scripts\Project_config.py ，\controllers\Train_main\Train_main.py 等等）
 
 切换算法在Train_main.py中进行切换（注释掉就行）
