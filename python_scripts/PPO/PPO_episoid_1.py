@@ -1,144 +1,17 @@
 # 测试
-import torch
 from python_scripts.PPO.PPO_episoid_2_1 import PPO_tai_episoid
-from python_scripts.Webots_interfaces import Environment
+from python_scripts.PPO.checkpoint_utils import (
+    _ensure_dir,
+    _next_log_file,
+    _reset_env_for_next_decision,
+    _save_single_checkpoint,
+    load_single_model,
+)
 from python_scripts.PPO.hppo_01 import HPPO as hppo
-# from Data_fusion import data_fusion
-from python_scripts.Project_config import path_list, gps_goal
+from python_scripts.PPO.training_manager import TrainingManager
 from python_scripts.PPO_Log_write import Log_write
-
-
-# ===== 路径与文件工具函数（统一管理） =====
-import os
-import glob
-import re
-
-
-# ===== 方案A: 训练管理器（同步三个模型的更新频率） =====
-class TrainingManager:
-    """
-    单智能体学习节奏管理。
-    核心思想：抓取和抬腿都先积累经验，再按统一间隔学习。
-    """
-    def __init__(self):
-        self.shared_episodes = 0
-        
-        # 统一学习间隔，避免同一智能体在不同阶段过于频繁更新
-        self.shared_learn_interval = 3
-        
-        print("【训练管理器初始化】")
-        print(f"  单智能体学习间隔: {self.shared_learn_interval}个episodes")
-    
-    def should_learn_shared(self) -> bool:
-        """决定是否执行单智能体学习"""
-        result = (self.shared_episodes % self.shared_learn_interval == 0) and (self.shared_episodes > 0)
-        return result
-    
-    def increment_shared(self):
-        """单智能体episode计数加1"""
-        self.shared_episodes += 1
-    
-    def get_status(self) -> str:
-        """获取当前训练状态"""
-        return f"[TrainingManager] Shared:{self.shared_episodes}"
-
-
-def _ensure_dir(path: str) -> None:
-    try:
-        os.makedirs(path, exist_ok=True)
-    except Exception:
-        pass
-
-def _next_log_file(dir_path: str, prefix: str) -> str:
-    pattern = os.path.join(dir_path, f"{prefix}_*.json")
-    existing = glob.glob(pattern)
-    max_n = 0
-    for p in existing:
-        m = re.search(rf"{re.escape(prefix)}_(\d+)\.json$", os.path.basename(p))
-        if m:
-            try:
-                n = int(m.group(1))
-                if n > max_n:
-                    max_n = n
-            except Exception:
-                continue
-    return os.path.join(dir_path, f"{prefix}_{max_n + 1}.json")
-
-def _latest_single_ckpt(dir_path: str):
-    """加载目录中最新的 single_hppo_*.ckpt。"""
-    files = glob.glob(os.path.join(dir_path, "single_hppo_*.ckpt"))
-    if not files:
-        return None, 0
-
-    def _num(f: str) -> int:
-        b = os.path.basename(f)
-        m_new = re.search(r"single_hppo_(\d+)\.ckpt$", b)
-        return int(m_new.group(1)) if m_new else -1
-
-    selected = max(files, key=_num)
-    return selected, _num(selected)
-
-
-def _reset_env_for_next_decision(env, wait_ms: int = 500):
-    env.reset()
-    env.wait(wait_ms)
-
-
-def _save_single_checkpoint(agent, ckpt_dir: str, total_episode: int):
-    save_path = os.path.join(ckpt_dir, f"single_hppo_{total_episode}.ckpt")
-    checkpoint = {
-        'policy': agent.policy.state_dict(),
-        'optimizer_hppo': agent.optimizer.state_dict(),
-        'episode': total_episode
-    }
-    torch.save(checkpoint, save_path)
-    print(f"模型已保存: {save_path}")
-
-# ===== 模型加载工具函数（提炼提高可读性） =====
-def load_single_model(model_path: str, hppo_agent, ckpt_dir: str) -> int:
-    """加载单智能体模型，优先指定路径；否则自动加载目录最新。"""
-    episode_start = 0
-    if model_path:
-        try:
-            ckpt = torch.load(model_path)
-            if isinstance(ckpt, dict) and 'policy' in ckpt:
-                hppo_agent.policy.load_state_dict(ckpt['policy'])
-                if 'optimizer_hppo' in ckpt and hppo_agent.optimizer:
-                    hppo_agent.optimizer.load_state_dict(ckpt['optimizer_hppo'])
-                print(f"从指定模型加载: {model_path}，单智能体模型加载成功！")
-                try:
-                    episode_start = int(os.path.basename(model_path).split('_')[-1].split('.')[0])
-                    print(f"从指定模型加载: {model_path}，从周期 {episode_start} 继续训练")
-                except Exception:
-                    pass
-            else:
-                hppo_agent.policy.load_state_dict(ckpt)
-                print(f"从指定模型加载: {model_path}，单智能体模型加载成功！")
-        except Exception as e:
-            print(f"指定模型加载失败: {e}")
-            episode_start = 0
-        return episode_start
-
-    # 未指定路径，查找目录最新
-    selected_model, episode_start = _latest_single_ckpt(ckpt_dir)
-    if selected_model:
-        try:
-            ckpt = torch.load(selected_model)
-            if isinstance(ckpt, dict) and 'policy' in ckpt:
-                hppo_agent.policy.load_state_dict(ckpt['policy'])
-                if 'optimizer_hppo' in ckpt and hppo_agent.optimizer:
-                    hppo_agent.optimizer.load_state_dict(ckpt['optimizer_hppo'])
-                print("单智能体模型加载成功！")
-            else:
-                hppo_agent.policy.load_state_dict(ckpt)
-                print("单智能体模型加载成功！")
-        except Exception as e:
-            print(f"单智能体模型加载失败: {e}")
-            episode_start = 0
-    else:
-        print("未找到已保存的单智能体模型，从头开始训练")
-        episode_start = 0
-    return episode_start
+from python_scripts.Project_config import gps_goal, path_list
+from python_scripts.Webots_interfaces import Environment
 
 
 def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
