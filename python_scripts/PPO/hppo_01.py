@@ -1,9 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import torch.nn.functional as F
 
-from torch.distributions import Bernoulli
 from torch.distributions import Normal
 from torch.distributions import Categorical
 from python_scripts.Project_config import device
@@ -13,6 +11,9 @@ class MultiDiscreteActorCritic(nn.Module):
         super().__init__()
         self.num_servos = num_servos
         self.node_num = node_num
+        # 动作映射固定为：离散6维(1决策+2抓取+3踩踏)，连续5维(2抓取+3踩踏)
+        self.num_discrete_actions = 6
+        self.num_continuous_actions = 5
         # 图像特征提取
         self.conv1 = nn.Conv2d(1, 32, (5, 5), stride=(2, 2), padding=1)
         self.relu = nn.ReLU()
@@ -26,16 +27,22 @@ class MultiDiscreteActorCritic(nn.Module):
         self.fc_graph = nn.Linear(20, 100)  # 修改输入维度从node_num改为20
         # 共享特征层
         self.fc4 = nn.Linear(300, 200)
-        # 多舵机离散动作头
-        self.discrete_head = nn.Linear(200, num_servos*2)  # 输出num_servos个logit
+        # 3个离散策略头：决策(1维)、抓取门控(2维)、踩踏门控(3维)
+        self.discrete_decision_head = nn.Linear(200, 2)
+        self.discrete_catch_head = nn.Linear(200, 2 * 2)
+        self.discrete_tai_head = nn.Linear(200, 3 * 2)
 
-        #连续动作头，输出值是已知所有动作的参数(输出维度因为所有需要参数的二倍)
-        self.continuous =nn.Sequential(
-            nn.Linear(200, num_servos),
-            nn.Tanh()  # Tanh激活函数将mu的范围限制在[-1, 1]
+        # 2个连续策略头：抓取参数(2维)、踩踏参数(3维)
+        self.continuous_catch = nn.Sequential(
+            nn.Linear(200, 2),
+            nn.Tanh()
         )
-
-        self.actor_log_sigma = nn.Parameter(torch.zeros(num_servos)* 0.1)
+        self.continuous_tai = nn.Sequential(
+            nn.Linear(200, 3),
+            nn.Tanh()
+        )
+        self.actor_log_sigma_catch = nn.Parameter(torch.zeros(2) * 0.1)
+        self.actor_log_sigma_tai = nn.Parameter(torch.zeros(3) * 0.1)
 
         # Critic头
         self.critic = nn.Linear(200, 1)
@@ -76,28 +83,15 @@ class MultiDiscreteActorCritic(nn.Module):
 
 
         features = self.fc4(state_x)
-        # 多舵机离散动作概率
-        discrete_logits = self.discrete_head(features)
-        #
-        # discrete_probs = torch.sigmoid(discrete_logits)  # [num_servos]
-        # 假设每个舵机有 2 种离散动作
-        discrete_logits = discrete_logits + 0.01 * torch.randn_like(discrete_logits)
-        discrete_logits = discrete_logits.view(-1, self.num_servos, 2)
+        decision_logits = self.discrete_decision_head(features).view(-1, 2)
+        grab_logits = self.discrete_catch_head(features).view(-1, 2, 2)
+        step_logits = self.discrete_tai_head(features).view(-1, 3, 2)
 
-        discrete_probs = F.softmax(discrete_logits, dim=-1)  # 在最后一个维度（动作维度）应用 softmax
-        discrete_dist = Categorical(probs=discrete_probs)
-        #将连续层的输出拆分为均值和方差
-        continuous_output = self.continuous(features)
-        mu = continuous_output  # 拆分
-        log_sigma = self.actor_log_sigma.expand_as(mu)
-        sigma = torch.exp(log_sigma)
+        grab_mu = self.continuous_catch(features).view(-1, 2)
+        step_mu = self.continuous_tai(features).view(-1, 3)
+        value = self.critic(features).view(-1)
 
-        # 构建正态分布
-        continuous_dist = Normal(mu, sigma)
-
-        value = self.critic(features)
-
-        return discrete_dist,continuous_dist,value
+        return decision_logits, grab_logits, step_logits, grab_mu, step_mu, value
 
 class HPPO:
     def __init__(self, num_servos, node_num, env_information=None ):
@@ -120,72 +114,83 @@ class HPPO:
         # 网络
         self.policy = MultiDiscreteActorCritic(num_servos, node_num).to(device)
         
-        # 优化器 - 使用更保守的学习率
+        # 单优化器：统一更新共享层 + 所有分支头 + value 头
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.lr)
-
-        self.optimizer_c = torch.optim.Adam(self.policy.continuous.parameters(),lr=self.lr)
-        self.optimizer_d = torch.optim.Adam(self.policy.discrete_head.parameters(), lr=self.lr)
-        self.optimizer_v = torch.optim.Adam(self.policy.critic.parameters(), lr=self.lr)
         # 学习率调度器 - 添加学习率衰减
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=self.lr_decay)
         # 轨迹缓存
         self.states = []
-        self.discrete_actions = []
-        self.continuous_actions = []
+
+        self.decisions = []
+        self.decision_log_probs = []
+
+        self.grab_discrete_actions = []
+        self.grab_discrete_log_probs = []
+        self.step_discrete_actions = []
+        self.step_discrete_log_probs = []
+
+        self.grab_continuous_actions = []
+        self.grab_continuous_log_probs = []
+        self.step_continuous_actions = []
+        self.step_continuous_log_probs = []
+
+        self.grab_success_flags = []
         self.rewards = []
         self.next_states = []
         self.values = []
-        self.discrete_log_probs = []
-        self.continuous_log_probs = []
         self.dones = []
+
+    def _build_distributions(self, decision_logits, grab_logits, step_logits, grab_mu, step_mu):
+        decision_dist = Categorical(logits=decision_logits)
+        grab_dist = Categorical(logits=grab_logits)
+        step_dist = Categorical(logits=step_logits)
+
+        grab_sigma = torch.exp(self.policy.actor_log_sigma_catch).expand_as(grab_mu)
+        step_sigma = torch.exp(self.policy.actor_log_sigma_tai).expand_as(step_mu)
+        grab_cont_dist = Normal(grab_mu, grab_sigma)
+        step_cont_dist = Normal(step_mu, step_sigma)
+        return decision_dist, grab_dist, step_dist, grab_cont_dist, step_cont_dist
 
 
     def choose_action(self, episode_num, obs, x_graph):
         with torch.no_grad():
-            discrete_dist, continuous_dist , value= self.policy(
+            decision_logits, grab_logits, step_logits, grab_mu, step_mu, value = self.policy(
                 x=obs[0],
                 state=obs[1],
                 x_graph=x_graph
             )
-            # discrete_probs, value = self.policy(x=obs[0], state=obs[1], x_graph=x_graph)
-            # m = Bernoulli(discrete_probs)
 
+            decision_dist, grab_dist, step_dist, grab_cont_dist, step_cont_dist = self._build_distributions(
+                decision_logits, grab_logits, step_logits, grab_mu, step_mu
+            )
 
-            # discrete_actions = m.sample()  # [num_servos]
-            # discrete_log_probs = m.log_prob(discrete_actions)  # [num_servos]
-            # action = discrete_actions.cpu().numpy()
-            # log_prob = discrete_log_probs.cpu().numpy()
+            decision = decision_dist.sample().squeeze(0)
+            grab_discrete = grab_dist.sample().squeeze(0)
+            step_discrete = step_dist.sample().squeeze(0)
 
-            discrete_action = discrete_dist.sample()  # 采样离散动作
+            grab_continuous = torch.clamp(grab_cont_dist.sample().squeeze(0), min=-1.0, max=1.0)
+            step_continuous = torch.clamp(step_cont_dist.sample().squeeze(0), min=-1.0, max=1.0)
 
-            #
-            # # 重新计算裁剪后的对数概率
+            decision_log_prob = decision_dist.log_prob(decision)
+            grab_discrete_log_prob = grab_dist.log_prob(grab_discrete)
+            step_discrete_log_prob = step_dist.log_prob(step_discrete)
+            grab_continuous_log_prob = grab_cont_dist.log_prob(grab_continuous).sum(-1)
+            step_continuous_log_prob = step_cont_dist.log_prob(step_continuous).sum(-1)
 
-            #
-            # # 2. 计算已采样动作的对数概率
-            # discrete_log_prob = discrete_dist.log_prob(discrete_action)
-            # # continuous_log_prob = continuous_dist.log_prob(continuous_action)
+            discrete_action = torch.cat((decision.view(1), grab_discrete, step_discrete), dim=0)
+            continuous_action = torch.cat((grab_continuous, step_continuous), dim=0)
 
-            if discrete_action.dim() > 1:
-                discrete_action = discrete_action.squeeze(0)  # 移除批次维度
-
-                # 采样连续动作
-            continuous_action = continuous_dist.sample()
-            if continuous_action.dim() > 1:
-                continuous_action = continuous_action.squeeze(0)
-
-            continuous_action = torch.clamp(continuous_action,
-                                            min=-1.0,
-                                            max=1.0)
-            # 计算对数概率
-            discrete_log_prob = discrete_dist.log_prob(discrete_action)
-            continuous_log_prob = continuous_dist.log_prob(continuous_action)
-
-            # 确保对数概率也是正确维度
-            if discrete_log_prob.dim() > 1:
-                discrete_log_prob = discrete_log_prob.squeeze(0)
-            if continuous_log_prob.dim() > 1:
-                continuous_log_prob = continuous_log_prob.squeeze(0)
+            discrete_log_prob = torch.cat(
+                (decision_log_prob.view(1), grab_discrete_log_prob, step_discrete_log_prob),
+                dim=0
+            )
+            continuous_log_prob = torch.cat(
+                (
+                    grab_cont_dist.log_prob(grab_continuous),
+                    step_cont_dist.log_prob(step_continuous),
+                ),
+                dim=0
+            )
 
             if isinstance(value, torch.Tensor):
                 value_scalar = value.item()  # 提取浮点数
@@ -194,6 +199,18 @@ class HPPO:
 
 
             action_dict = {
+                'decision': int(decision.item()),
+                'decision_log_prob': float(decision_log_prob.item()),
+                'grab_discrete': grab_discrete.cpu().numpy(),
+                'grab_discrete_log_prob': grab_discrete_log_prob.cpu().numpy(),
+                'step_discrete': step_discrete.cpu().numpy(),
+                'step_discrete_log_prob': step_discrete_log_prob.cpu().numpy(),
+                'grab_continuous': grab_continuous.cpu().numpy(),
+                'grab_continuous_log_prob': float(grab_continuous_log_prob.item()),
+                'step_continuous': step_continuous.cpu().numpy(),
+                'step_continuous_log_prob': float(step_continuous_log_prob.item()),
+
+                # 兼容旧调用方
                 'discrete_action': discrete_action.cpu().numpy(),
                 'continuous_action': continuous_action.cpu().numpy(),
                 'discrete_log_prob': discrete_log_prob.cpu().numpy(),
@@ -212,15 +229,59 @@ class HPPO:
     #     self.log_probs.append(log_prob)
     #     self.dones.append(done)
     def store_transition(self, state, discrete_action, continuous_action, reward, next_state, done, value,
-                         discrete_log_prob, continuous_log_prob):
+                         discrete_log_prob, continuous_log_prob, decision=None, decision_log_prob=None,
+                         grab_discrete=None, grab_discrete_log_prob=None, step_discrete=None,
+                         step_discrete_log_prob=None, grab_continuous=None,
+                         grab_continuous_log_prob=None, step_continuous=None,
+                         step_continuous_log_prob=None, grab_success=True):
+        discrete_action = np.asarray(discrete_action)
+        continuous_action = np.asarray(continuous_action)
+        discrete_log_prob = np.asarray(discrete_log_prob)
+
+        if decision is None:
+            decision = int(discrete_action[0])
+        if decision_log_prob is None:
+            decision_log_prob = float(discrete_log_prob[0])
+
+        if grab_discrete is None:
+            grab_discrete = discrete_action[1:3]
+        if grab_discrete_log_prob is None:
+            grab_discrete_log_prob = discrete_log_prob[1:3]
+
+        if step_discrete is None:
+            step_discrete = discrete_action[3:6]
+        if step_discrete_log_prob is None:
+            step_discrete_log_prob = discrete_log_prob[3:6]
+
+        if grab_continuous is None:
+            grab_continuous = continuous_action[0:2]
+        if step_continuous is None:
+            step_continuous = continuous_action[2:5]
+
+        continuous_log_prob = np.asarray(continuous_log_prob)
+        if grab_continuous_log_prob is None:
+            grab_continuous_log_prob = float(np.sum(continuous_log_prob[0:2]))
+        if step_continuous_log_prob is None:
+            step_continuous_log_prob = float(np.sum(continuous_log_prob[2:5]))
+
         self.states.append(state)
-        self.discrete_actions.append(discrete_action)
-        self.continuous_actions.append(continuous_action)
+        self.decisions.append(int(decision))
+        self.decision_log_probs.append(float(decision_log_prob))
+
+        self.grab_discrete_actions.append(np.asarray(grab_discrete, dtype=np.int64))
+        self.grab_discrete_log_probs.append(np.asarray(grab_discrete_log_prob, dtype=np.float32))
+        self.step_discrete_actions.append(np.asarray(step_discrete, dtype=np.int64))
+        self.step_discrete_log_probs.append(np.asarray(step_discrete_log_prob, dtype=np.float32))
+
+        self.grab_continuous_actions.append(np.asarray(grab_continuous, dtype=np.float32))
+        self.grab_continuous_log_probs.append(float(grab_continuous_log_prob))
+        self.step_continuous_actions.append(np.asarray(step_continuous, dtype=np.float32))
+        self.step_continuous_log_probs.append(float(step_continuous_log_prob))
+
+        self.grab_success_flags.append(float(grab_success))
         self.rewards.append(reward)
         self.next_states.append(next_state)
         self.values.append(value)
-        self.discrete_log_probs.append(discrete_log_prob)  # 存储离散对数概率
-        self.continuous_log_probs.append(continuous_log_prob)  # 存储连续对数概率
         self.dones.append(done)
 
     def calculate_advantages(self):
@@ -244,13 +305,24 @@ class HPPO:
 
     def _clear_buffer(self):
         self.states = []
-        self.discrete_actions = []
-        self.continuous_actions = []
+
+        self.decisions = []
+        self.decision_log_probs = []
+
+        self.grab_discrete_actions = []
+        self.grab_discrete_log_probs = []
+        self.step_discrete_actions = []
+        self.step_discrete_log_probs = []
+
+        self.grab_continuous_actions = []
+        self.grab_continuous_log_probs = []
+        self.step_continuous_actions = []
+        self.step_continuous_log_probs = []
+
+        self.grab_success_flags = []
         self.rewards = []
         self.next_states = []
         self.values = []
-        self.discrete_log_probs = []
-        self.continuous_log_probs = []
         self.dones = []
 
 
@@ -265,122 +337,112 @@ class HPPO:
         # 转换为张量并移动到设备
         batch_states = self.states  # 列表，每个元素是状态元组
         # 先汇总为 numpy 数组，再转 tensor，避免 list[np.ndarray] 的慢路径告警
-        batch_discrete_actions = torch.as_tensor(
-            np.asarray(self.discrete_actions), dtype=torch.long, device=self.device
-        )
-        batch_continuous_actions = torch.as_tensor(
-            np.asarray(self.continuous_actions), dtype=torch.float32, device=self.device
-        )
-        batch_discrete_log_probs = torch.as_tensor(
-            np.asarray(self.discrete_log_probs), dtype=torch.float32, device=self.device
-        )
-        batch_continuous_log_probs = torch.as_tensor(
-            np.asarray(self.continuous_log_probs), dtype=torch.float32, device=self.device
-        )
+        batch_decisions = torch.as_tensor(np.asarray(self.decisions), dtype=torch.long, device=self.device)
+        batch_decision_log_probs = torch.as_tensor(np.asarray(self.decision_log_probs), dtype=torch.float32, device=self.device)
+
+        batch_grab_discrete_actions = torch.as_tensor(np.asarray(self.grab_discrete_actions), dtype=torch.long, device=self.device)
+        batch_grab_discrete_log_probs = torch.as_tensor(np.asarray(self.grab_discrete_log_probs), dtype=torch.float32, device=self.device)
+        batch_step_discrete_actions = torch.as_tensor(np.asarray(self.step_discrete_actions), dtype=torch.long, device=self.device)
+        batch_step_discrete_log_probs = torch.as_tensor(np.asarray(self.step_discrete_log_probs), dtype=torch.float32, device=self.device)
+
+        batch_grab_continuous_actions = torch.as_tensor(np.asarray(self.grab_continuous_actions), dtype=torch.float32, device=self.device)
+        batch_grab_continuous_log_probs = torch.as_tensor(np.asarray(self.grab_continuous_log_probs), dtype=torch.float32, device=self.device)
+        batch_step_continuous_actions = torch.as_tensor(np.asarray(self.step_continuous_actions), dtype=torch.float32, device=self.device)
+        batch_step_continuous_log_probs = torch.as_tensor(np.asarray(self.step_continuous_log_probs), dtype=torch.float32, device=self.device)
+
+        batch_grab_success = torch.as_tensor(np.asarray(self.grab_success_flags), dtype=torch.float32, device=self.device)
 
         # 标准化优势
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        total_loss = 0
         loss_continuous = 0
         loss_discrete = 0
 
         for _ in range(self.policy_update_epochs):
-            all_discrete_dists = []
-            all_continuous_dists = []
+            all_decision_dists = []
+            all_grab_dists = []
+            all_step_dists = []
+            all_grab_cont_dists = []
+            all_step_cont_dists = []
             all_values = []
 
             # 批量处理状态
             for i in range(len(batch_states)):
-                discrete_dist, continuous_dist, value = self.policy(
+                decision_logits, grab_logits, step_logits, grab_mu, step_mu, value = self.policy(
                     x=batch_states[i][0],
                     state=batch_states[i][1],
                     x_graph=batch_states[i][2]
                 )
-                all_discrete_dists.append(discrete_dist)
-                all_continuous_dists.append(continuous_dist)
-                all_values.append(value)
+                decision_dist, grab_dist, step_dist, grab_cont_dist, step_cont_dist = self._build_distributions(
+                    decision_logits, grab_logits, step_logits, grab_mu, step_mu
+                )
 
-            # 计算新策略的对数概率
-            new_discrete_log_probs = torch.stack(
-                [all_discrete_dists[i].log_prob(batch_discrete_actions[i]).squeeze(0) for i in range(len(all_discrete_dists))]
-            )  # [B, num_servos]
-            new_continuous_log_probs = torch.stack(
-                [all_continuous_dists[i].log_prob(batch_continuous_actions[i]).squeeze(0) for i in range(len(all_continuous_dists))]
-            )  # [B, num_servos]
-            all_values = torch.cat(all_values)
+                all_decision_dists.append(decision_dist)
+                all_grab_dists.append(grab_dist)
+                all_step_dists.append(step_dist)
+                all_grab_cont_dists.append(grab_cont_dist)
+                all_step_cont_dists.append(step_cont_dist)
+                all_values.append(value.squeeze(0))
 
-            if advantages.dim() == 1:
-                advantages = advantages.unsqueeze(1)
+            new_decision_log_probs = torch.stack(
+                [all_decision_dists[i].log_prob(batch_decisions[i]) for i in range(len(all_decision_dists))]
+            )
+            new_grab_discrete_log_probs = torch.stack(
+                [all_grab_dists[i].log_prob(batch_grab_discrete_actions[i]).squeeze(0) for i in range(len(all_grab_dists))]
+            )
+            new_step_discrete_log_probs = torch.stack(
+                [all_step_dists[i].log_prob(batch_step_discrete_actions[i]).squeeze(0) for i in range(len(all_step_dists))]
+            )
+            new_grab_cont_log_probs = torch.stack(
+                [all_grab_cont_dists[i].log_prob(batch_grab_continuous_actions[i]).sum(-1).squeeze(0)
+                 for i in range(len(all_grab_cont_dists))]
+            )
+            new_step_cont_log_probs = torch.stack(
+                [all_step_cont_dists[i].log_prob(batch_step_continuous_actions[i]).sum(-1).squeeze(0)
+                 for i in range(len(all_step_cont_dists))]
+            )
 
-            ratios_c = torch.exp(new_continuous_log_probs - batch_continuous_log_probs)
-            ratios_d = torch.exp(new_discrete_log_probs - batch_discrete_log_probs)
-            #ratios_v = torch.exp() 感觉不太用吧
+            all_values = torch.stack(all_values)
 
-            # 对于离散网络
-            surr1_d = ratios_d * advantages
-            surr2_d = torch.clamp(ratios_d,1 - self.clip_ratio,1 + self.clip_ratio) * advantages
-            discrete_loss = -torch.min(surr2_d,surr1_d).mean(dim=1).mean()
+            decision_mask = torch.ones_like(advantages)
+            grab_mask = (batch_decisions == 0).float()
+            step_mask = ((batch_decisions == 1).float() * batch_grab_success)
 
-            #对于连续网络
-            surr1_c = ratios_c * advantages
-            surr2_c = torch.clamp(ratios_c, 1 - self.clip_ratio, 1 + self.clip_ratio) * advantages
-            continuous_loss = -torch.min(surr2_c, surr1_c).mean(dim=1).mean()
+            old_grab_discrete_log_probs = batch_grab_discrete_log_probs.sum(-1)
+            old_step_discrete_log_probs = batch_step_discrete_log_probs.sum(-1)
 
-            # # PPO裁剪损失
-            # surr1 = ratios * advantages
-            # surr2 = torch.clamp(ratios, 1 - self.clip_ratio, 1 + self.clip_ratio) * advantages
-            # policy_loss = -torch.min(surr1, surr2).mean()
-            # #计算方法，首先是比率乘优势函数，比率是由新的策略产生的动作的概率除以旧的策略，得到对该动作的倾向
-            # #surr2是防止变化太大，设定一个变化范围
+            def masked_ppo_loss(new_lp, old_lp, adv, mask):
+                ratio = torch.exp(new_lp - old_lp)
+                surr1 = ratio * adv
+                surr2 = torch.clamp(ratio, 1 - self.clip_ratio, 1 + self.clip_ratio) * adv
+                loss_each = -torch.min(surr1, surr2)
+                denom = torch.clamp(mask.sum(), min=1.0)
+                return (loss_each * mask).sum() / denom
 
+            decision_loss = masked_ppo_loss(new_decision_log_probs, batch_decision_log_probs, advantages, decision_mask)
+            grab_discrete_loss = masked_ppo_loss(new_grab_discrete_log_probs.sum(-1), old_grab_discrete_log_probs, advantages, grab_mask)
+            step_discrete_loss = masked_ppo_loss(new_step_discrete_log_probs.sum(-1), old_step_discrete_log_probs, advantages, step_mask)
+            grab_continuous_loss = masked_ppo_loss(new_grab_cont_log_probs, batch_grab_continuous_log_probs, advantages, grab_mask)
+            step_continuous_loss = masked_ppo_loss(new_step_cont_log_probs, batch_step_continuous_log_probs, advantages, step_mask)
 
-            # 价值损失
-            value_loss = nn.MSELoss()(all_values, returns)
+            value_loss = ((all_values - returns) ** 2).mean()
 
-            # 熵奖励（鼓励探索）
-            discrete_entropy = torch.stack([dist.entropy().mean() for dist in all_discrete_dists]).mean()
-            continuous_entropy = torch.stack([dist.entropy().mean() for dist in all_continuous_dists]).mean()
+            total_loss = (
+                decision_loss +
+                grab_discrete_loss +
+                grab_continuous_loss +
+                step_discrete_loss +
+                step_continuous_loss +
+                self.value_coef * value_loss
+            )
 
-            # entropy_bonus = discrete_entropy + continuous_entropy
-
-            # 总损失
-            # loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy_bonus
-
-            # 离散损失
-            loss_d = discrete_loss +  self.value_coef * value_loss - self.entropy_coef * discrete_entropy
-
-            #连续损失
-            loss_c = continuous_loss +  self.value_coef * value_loss - self.entropy_coef * continuous_entropy
-
-            #由三部分组成，策略损失，价值损失，熵奖励
-
-            # 反向传播和优化
-            # self.optimizer.zero_grad()
-            # loss.backward()
-            # torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
-            # self.optimizer.step()
-
-            # 离散网络的反向传播和优化
-            self.optimizer_d.zero_grad()
-            loss_d.backward(retain_graph=True)
-            torch.nn.utils.clip_grad_norm_(self.policy.discrete_head.parameters(), max_norm=0.5)
-            self.optimizer_d.step()
-
-            # 连续网络反向传播和优化
-            self.optimizer_c.zero_grad()
-            loss_c.backward(retain_graph=True)
-            torch.nn.utils.clip_grad_norm_(self.policy.continuous.parameters(), max_norm=0.5)
-            self.optimizer_c.step()
-
-            # Critic网络更新
-            self.optimizer_v.zero_grad()
-            value_loss.backward()
+            self.optimizer.zero_grad()
+            total_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
-            self.optimizer_v.step()
+            self.optimizer.step()
 
-            loss_discrete += loss_d.item()
-            loss_continuous += loss_c.item()
+            loss_discrete += (decision_loss + grab_discrete_loss + step_discrete_loss).item()
+            loss_continuous += (grab_continuous_loss + step_continuous_loss + self.value_coef * value_loss).item()
 
         # 清空缓冲区
         self._clear_buffer()
