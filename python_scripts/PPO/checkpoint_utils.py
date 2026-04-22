@@ -43,11 +43,6 @@ def _latest_single_ckpt(dir_path: str):
     return selected, _num(selected)
 
 
-def _reset_env_for_next_decision(env, wait_ms: int = 500):
-    env.reset()
-    env.wait(wait_ms)
-
-
 def _save_single_checkpoint(agent, ckpt_dir: str, total_episode: int):
     save_path = os.path.join(ckpt_dir, f"single_hppo_{total_episode}.ckpt")
     checkpoint = {

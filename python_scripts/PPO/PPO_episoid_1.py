@@ -3,7 +3,6 @@ from python_scripts.PPO.PPO_episoid_2_1 import PPO_tai_episoid
 from python_scripts.PPO.checkpoint_utils import (
     _ensure_dir,
     _next_log_file,
-    _reset_env_for_next_decision,
     _save_single_checkpoint,
     load_single_model,
 )
@@ -12,6 +11,11 @@ from python_scripts.PPO.training_manager import TrainingManager
 from python_scripts.PPO_Log_write import Log_write
 from python_scripts.Project_config import gps_goal, path_list
 from python_scripts.Webots_interfaces import Environment
+
+
+def _reset_env_for_next_decision(env, wait_ms: int = 500):
+    env.reset()
+    env.wait(wait_ms)
 
 
 def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
