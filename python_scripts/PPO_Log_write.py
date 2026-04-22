@@ -101,7 +101,12 @@ class Log_write:
 
     def add_cycle_record(self, episode_num=None, action_type=None, decision_reward=None,
                          catch_reward=None, tai_reward=None, total_reward=None,
-                         loss_discrete=None, loss_continuous=None, **extra_fields):
+                         loss_discrete=None, loss_continuous=None,
+                         loss_decision=None, loss_grab_discrete=None, loss_step_discrete=None,
+                         loss_grab_continuous=None, loss_step_continuous=None,
+                         loss_value=None, loss_total=None,
+                         grab_mask_mean=None, step_mask_mean=None,
+                         **extra_fields):
         total_episode_num = extra_fields.get('total_episode_num')
         canonical_episode_num = total_episode_num if total_episode_num is not None else episode_num
         record = {
@@ -113,6 +118,16 @@ class Log_write:
             'total_reward': self._normalize_scalar(total_reward),
             'loss_discrete': self._normalize_scalar(loss_discrete),
             'loss_continuous': self._normalize_scalar(loss_continuous),
+            # Branching PPO 细分损失（与原字段同样按标量序列存储）
+            'loss_decision': self._normalize_scalar(loss_decision),
+            'loss_grab_discrete': self._normalize_scalar(loss_grab_discrete),
+            'loss_step_discrete': self._normalize_scalar(loss_step_discrete),
+            'loss_grab_continuous': self._normalize_scalar(loss_grab_continuous),
+            'loss_step_continuous': self._normalize_scalar(loss_step_continuous),
+            'loss_value': self._normalize_scalar(loss_value),
+            'loss_total': self._normalize_scalar(loss_total),
+            'grab_mask_mean': self._normalize_scalar(grab_mask_mean),
+            'step_mask_mean': self._normalize_scalar(step_mask_mean),
         }
         for key, value in extra_fields.items():
             record[key] = self._normalize_scalar(value)
@@ -122,7 +137,12 @@ class Log_write:
 
     def log_cycle(self, file_path, episode_num=None, action_type=None, decision_reward=None,
                   catch_reward=None, tai_reward=None, total_reward=None,
-                  loss_discrete=None, loss_continuous=None, **extra_fields):
+                  loss_discrete=None, loss_continuous=None,
+                  loss_decision=None, loss_grab_discrete=None, loss_step_discrete=None,
+                  loss_grab_continuous=None, loss_step_continuous=None,
+                  loss_value=None, loss_total=None,
+                  grab_mask_mean=None, step_mask_mean=None,
+                  **extra_fields):
         self.add_cycle_record(
             episode_num=episode_num,
             action_type=action_type,
@@ -132,12 +152,37 @@ class Log_write:
             total_reward=total_reward,
             loss_discrete=loss_discrete,
             loss_continuous=loss_continuous,
+            loss_decision=loss_decision,
+            loss_grab_discrete=loss_grab_discrete,
+            loss_step_discrete=loss_step_discrete,
+            loss_grab_continuous=loss_grab_continuous,
+            loss_step_continuous=loss_step_continuous,
+            loss_value=loss_value,
+            loss_total=loss_total,
+            grab_mask_mean=grab_mask_mean,
+            step_mask_mean=step_mask_mean,
             **extra_fields,
         )
         self.save(file_path)
 
-    def add_loss(self, loss_discrete, loss_continuous):
-        self.add_cycle_record(loss_discrete=loss_discrete, loss_continuous=loss_continuous)
+    def add_loss(self, loss_discrete=None, loss_continuous=None,
+                 loss_decision=None, loss_grab_discrete=None, loss_step_discrete=None,
+                 loss_grab_continuous=None, loss_step_continuous=None,
+                 loss_value=None, loss_total=None,
+                 grab_mask_mean=None, step_mask_mean=None):
+        self.add_cycle_record(
+            loss_discrete=loss_discrete,
+            loss_continuous=loss_continuous,
+            loss_decision=loss_decision,
+            loss_grab_discrete=loss_grab_discrete,
+            loss_step_discrete=loss_step_discrete,
+            loss_grab_continuous=loss_grab_continuous,
+            loss_step_continuous=loss_step_continuous,
+            loss_value=loss_value,
+            loss_total=loss_total,
+            grab_mask_mean=grab_mask_mean,
+            step_mask_mean=step_mask_mean,
+        )
 
     def add_reward(self, decision_reward=None, catch_reward=None, tai_reward=None, total_reward=None):
         self.add_cycle_record(
