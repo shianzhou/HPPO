@@ -139,6 +139,17 @@ class HPPO:
         self.next_states = []
         self.values = []
         self.dones = []
+        self.last_learn_stats = {
+            'loss_decision': None,
+            'loss_grab_discrete': None,
+            'loss_step_discrete': None,
+            'loss_grab_continuous': None,
+            'loss_step_continuous': None,
+            'loss_value': None,
+            'loss_total': None,
+            'grab_mask_mean': None,
+            'step_mask_mean': None,
+        }
 
     def _build_distributions(self, decision_logits, grab_logits, step_logits, grab_mu, step_mu):
         decision_dist = Categorical(logits=decision_logits)
@@ -177,6 +188,21 @@ class HPPO:
             grab_continuous_log_prob = grab_cont_dist.log_prob(grab_continuous).sum(-1)
             step_continuous_log_prob = step_cont_dist.log_prob(step_continuous).sum(-1)
 
+            # 分布保留了 batch 维，这里统一去掉，确保后续拼接维度一致
+            if decision_log_prob.dim() > 0:
+                decision_log_prob = decision_log_prob.squeeze(0)
+            if grab_discrete_log_prob.dim() > 1:
+                grab_discrete_log_prob = grab_discrete_log_prob.squeeze(0)
+            if step_discrete_log_prob.dim() > 1:
+                step_discrete_log_prob = step_discrete_log_prob.squeeze(0)
+
+            grab_continuous_log_prob_vec = grab_cont_dist.log_prob(grab_continuous)
+            step_continuous_log_prob_vec = step_cont_dist.log_prob(step_continuous)
+            if grab_continuous_log_prob_vec.dim() > 1:
+                grab_continuous_log_prob_vec = grab_continuous_log_prob_vec.squeeze(0)
+            if step_continuous_log_prob_vec.dim() > 1:
+                step_continuous_log_prob_vec = step_continuous_log_prob_vec.squeeze(0)
+
             discrete_action = torch.cat((decision.view(1), grab_discrete, step_discrete), dim=0)
             continuous_action = torch.cat((grab_continuous, step_continuous), dim=0)
 
@@ -186,8 +212,8 @@ class HPPO:
             )
             continuous_log_prob = torch.cat(
                 (
-                    grab_cont_dist.log_prob(grab_continuous),
-                    step_cont_dist.log_prob(step_continuous),
+                    grab_continuous_log_prob_vec,
+                    step_continuous_log_prob_vec,
                 ),
                 dim=0
             )
@@ -328,6 +354,17 @@ class HPPO:
 
     def learn(self):
         if len(self.states) < 32:  # 使用定义的batch_size
+            self.last_learn_stats = {
+                'loss_decision': None,
+                'loss_grab_discrete': None,
+                'loss_step_discrete': None,
+                'loss_grab_continuous': None,
+                'loss_step_continuous': None,
+                'loss_value': None,
+                'loss_total': None,
+                'grab_mask_mean': None,
+                'step_mask_mean': None,
+            }
             return 0,0
 
         # 计算优势函数和回报（当前实现正确，无需修改）
@@ -357,6 +394,15 @@ class HPPO:
 
         loss_continuous = 0
         loss_discrete = 0
+        loss_decision_sum = 0
+        loss_grab_discrete_sum = 0
+        loss_step_discrete_sum = 0
+        loss_grab_continuous_sum = 0
+        loss_step_continuous_sum = 0
+        loss_value_sum = 0
+        loss_total_sum = 0
+        grab_mask_mean_sum = 0
+        step_mask_mean_sum = 0
 
         for _ in range(self.policy_update_epochs):
             all_decision_dists = []
@@ -443,6 +489,27 @@ class HPPO:
 
             loss_discrete += (decision_loss + grab_discrete_loss + step_discrete_loss).item()
             loss_continuous += (grab_continuous_loss + step_continuous_loss + self.value_coef * value_loss).item()
+            loss_decision_sum += decision_loss.item()
+            loss_grab_discrete_sum += grab_discrete_loss.item()
+            loss_step_discrete_sum += step_discrete_loss.item()
+            loss_grab_continuous_sum += grab_continuous_loss.item()
+            loss_step_continuous_sum += step_continuous_loss.item()
+            loss_value_sum += value_loss.item()
+            loss_total_sum += total_loss.item()
+            grab_mask_mean_sum += grab_mask.mean().item()
+            step_mask_mean_sum += step_mask.mean().item()
+
+        self.last_learn_stats = {
+            'loss_decision': loss_decision_sum / self.policy_update_epochs,
+            'loss_grab_discrete': loss_grab_discrete_sum / self.policy_update_epochs,
+            'loss_step_discrete': loss_step_discrete_sum / self.policy_update_epochs,
+            'loss_grab_continuous': loss_grab_continuous_sum / self.policy_update_epochs,
+            'loss_step_continuous': loss_step_continuous_sum / self.policy_update_epochs,
+            'loss_value': loss_value_sum / self.policy_update_epochs,
+            'loss_total': loss_total_sum / self.policy_update_epochs,
+            'grab_mask_mean': grab_mask_mean_sum / self.policy_update_epochs,
+            'step_mask_mean': step_mask_mean_sum / self.policy_update_epochs,
+        }
 
         # 清空缓冲区
         self._clear_buffer()

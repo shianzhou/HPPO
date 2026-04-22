@@ -120,6 +120,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             prev_distance = None
             catch_loss_discrete = 0
             catch_loss_continuous = 0
+            catch_loss_stats = {}
             while True:
                     # print(f'总周期{total_episode}，第{steps}步')
                     ppo_state = [robot_state[1], robot_state[0], robot_state[5], robot_state[4]]  # 将机器人状态转换为ppo状态
@@ -294,6 +295,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                         if training_manager.should_learn_shared():
                             loss_d, loss_c = hppo_agent.learn()
                             catch_loss_discrete, catch_loss_continuous = loss_d, loss_c
+                            catch_loss_stats = dict(getattr(hppo_agent, 'last_learn_stats', {}))
                             loss1, loss2 = loss_d, loss_c
                             print(f'【单智能体学习-抓取阶段】{training_manager.get_status()} | loss_discrete: {loss1:.6f}, loss_continuous: {loss2:.6f}')
                         else:
@@ -331,6 +333,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                 loss_continuous=catch_loss_continuous,
                 total_episode_num=total_episode,
                 phase_episode_num=episode_num,
+                **catch_loss_stats,
             )
             if not need_reset_after_cycle:
                 catch_success = True
