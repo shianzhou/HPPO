@@ -264,7 +264,18 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                             done=done,
                             value=value,
                             discrete_log_prob=dict['discrete_log_prob'],
-                            continuous_log_prob=dict['continuous_log_prob']
+                            continuous_log_prob=dict['continuous_log_prob'],
+                            decision=dict['decision'],
+                            decision_log_prob=dict['decision_log_prob'],
+                            grab_discrete=dict['grab_discrete'],
+                            grab_discrete_log_prob=dict['grab_discrete_log_prob'],
+                            step_discrete=dict['step_discrete'],
+                            step_discrete_log_prob=dict['step_discrete_log_prob'],
+                            grab_continuous=dict['grab_continuous'],
+                            grab_continuous_log_prob=dict['grab_continuous_log_prob'],
+                            step_continuous=dict['step_continuous'],
+                            step_continuous_log_prob=dict['step_continuous_log_prob'],
+                            grab_success=True
                         )
                     robot_state = env.get_robot_state()  # 获取机器人状态
 

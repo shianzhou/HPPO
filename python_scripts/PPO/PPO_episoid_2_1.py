@@ -239,7 +239,18 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
                 done=done,
                 value=tai_value,
                 discrete_log_prob=tai_dict['discrete_log_prob'],
-                continuous_log_prob=tai_continuous_log_prob_full
+                continuous_log_prob=tai_continuous_log_prob_full,
+                decision=tai_dict['decision'],
+                decision_log_prob=tai_dict['decision_log_prob'],
+                grab_discrete=tai_dict['grab_discrete'],
+                grab_discrete_log_prob=tai_dict['grab_discrete_log_prob'],
+                step_discrete=tai_dict['step_discrete'],
+                step_discrete_log_prob=tai_dict['step_discrete_log_prob'],
+                grab_continuous=tai_dict['grab_continuous'],
+                grab_continuous_log_prob=tai_dict['grab_continuous_log_prob'],
+                step_continuous=tai_dict['step_continuous'],
+                step_continuous_log_prob=tai_dict['step_continuous_log_prob'],
+                grab_success=catch_success
             )
             print(f"  已存储经验: reward={reward:.4f}")
                         
