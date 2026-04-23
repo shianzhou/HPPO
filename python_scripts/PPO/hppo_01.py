@@ -50,8 +50,18 @@ class MultiDiscreteActorCritic(nn.Module):
     def forward(self, x, state, x_graph):
         # 图像特征（兼容单样本与批量输入）
         x = torch.as_tensor(x, dtype=torch.float32, device=device)
-        if x.dim() == 3:
-            x = x.unsqueeze(0)  # [1,C,H,W]
+        if x.dim() == 2:
+            # [H,W] -> [1,1,H,W]
+            x = x.unsqueeze(0).unsqueeze(0)
+        elif x.dim() == 3:
+            if x.shape[0] == 1:
+                # [C,H,W] -> [1,C,H,W]
+                x = x.unsqueeze(0)
+            else:
+                # [B,H,W] -> [B,1,H,W]
+                x = x.unsqueeze(1)
+        elif x.dim() != 4:
+            raise ValueError(f"Unsupported image tensor shape: {tuple(x.shape)}")
         x = self.conv1(x)
         x = self.relu(x)
         x = self.conv2(x)
