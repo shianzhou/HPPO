@@ -48,38 +48,34 @@ class MultiDiscreteActorCritic(nn.Module):
         self.critic = nn.Linear(200, 1)
 
     def forward(self, x, state, x_graph):
-        # 图像特征
-        x = torch.as_tensor(x, dtype=torch.float32).to(device)
-        # 上游传入的x通常已是[C,H,W]=(1,H,W)，与PPO保持一致，这里仅增加batch维
-        x = torch.unsqueeze(x, dim=0)  # [N=1,C,H,W]
+        # 图像特征（兼容单样本与批量输入）
+        x = torch.as_tensor(x, dtype=torch.float32, device=device)
+        if x.dim() == 3:
+            x = x.unsqueeze(0)  # [1,C,H,W]
         x = self.conv1(x)
         x = self.relu(x)
         x = self.conv2(x)
         x = self.relu(x)
         x = self.conv3(x)
-        x = x.view(x.size(0), -1)
-        x = torch.flatten(x)
+        x = torch.flatten(x, start_dim=1)
         x = self.fc0(x)
         x = self.fc1(x)
-        min_val1 = torch.min(x)
-        max_val1 = torch.max(x)
-        normalized_data1 = torch.div(torch.sub(x, min_val1), torch.sub(max_val1, min_val1))
+
         # 状态特征
-        state = torch.as_tensor(state, dtype=torch.float32).to(device)
+        state = torch.as_tensor(state, dtype=torch.float32, device=device)
+        if state.dim() == 1:
+            state = state.unsqueeze(0)
         state = self.fc2(state)
         state = self.fc3(state)
-        min_val2 = torch.min(state)
-        max_val2 = torch.max(state)
-        normalized_data2 = torch.div(torch.sub(state, min_val2), torch.sub(max_val2, min_val2))
-        # 图特征（简化为全连接）
-        x_graph = torch.as_tensor(x_graph, dtype=torch.float32).to(device)
-        x_graph = self.fc_graph(x_graph)
-        min_val3 = torch.min(x_graph)
-        max_val3 = torch.max(x_graph)
-        normalized_x_graph = torch.div(torch.sub(x_graph, min_val3), torch.sub(max_val3, min_val3))
-        # 融合
 
-        state_x = torch.cat((normalized_data1, normalized_data2, normalized_x_graph), dim=-1)
+        # 图特征（简化为全连接）
+        x_graph = torch.as_tensor(x_graph, dtype=torch.float32, device=device)
+        if x_graph.dim() == 1:
+            x_graph = x_graph.unsqueeze(0)
+        x_graph = self.fc_graph(x_graph)
+
+        # 融合
+        state_x = torch.cat((x, state, x_graph), dim=-1)
 
 
         features = self.fc4(state_x)
@@ -118,6 +114,8 @@ class HPPO:
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.lr)
         # 学习率调度器 - 添加学习率衰减
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=self.lr_decay)
+        # Advantage 调试输出开关；打开后每次 learn 都会打印分布统计
+        self.print_advantage_stats = False
         # 轨迹缓存
         self.states = []
 
@@ -149,6 +147,31 @@ class HPPO:
             'loss_total': None,
             'grab_mask_mean': None,
             'step_mask_mean': None,
+            'adv_raw_mean': None,
+            'adv_raw_std': None,
+            'adv_raw_max': None,
+            'adv_raw_min': None,
+            'adv_norm_mean': None,
+            'adv_norm_std': None,
+            'adv_norm_max': None,
+            'adv_norm_min': None,
+            'ratio_decision_mean': None,
+            'ratio_decision_std': None,
+            'ratio_decision_p05': None,
+            'ratio_decision_p95': None,
+            'clipfrac_decision': None,
+            'approx_kl_decision': None,
+            'ratio_grab_mean': None,
+            'clipfrac_grab': None,
+            'approx_kl_grab': None,
+            'ratio_step_mean': None,
+            'clipfrac_step': None,
+            'approx_kl_step': None,
+            'returns_mean': None,
+            'returns_std': None,
+            'values_mean': None,
+            'values_std': None,
+            'explained_variance': None,
         }
 
     def _build_distributions(self, decision_logits, grab_logits, step_logits, grab_mu, step_mu):
@@ -364,15 +387,50 @@ class HPPO:
                 'loss_total': None,
                 'grab_mask_mean': None,
                 'step_mask_mean': None,
+                'adv_raw_mean': None,
+                'adv_raw_std': None,
+                'adv_raw_max': None,
+                'adv_raw_min': None,
+                'adv_norm_mean': None,
+                'adv_norm_std': None,
+                'adv_norm_max': None,
+                'adv_norm_min': None,
+                'ratio_decision_mean': None,
+                'ratio_decision_std': None,
+                'ratio_decision_p05': None,
+                'ratio_decision_p95': None,
+                'clipfrac_decision': None,
+                'approx_kl_decision': None,
+                'ratio_grab_mean': None,
+                'clipfrac_grab': None,
+                'approx_kl_grab': None,
+                'ratio_step_mean': None,
+                'clipfrac_step': None,
+                'approx_kl_step': None,
+                'returns_mean': None,
+                'returns_std': None,
+                'values_mean': None,
+                'values_std': None,
+                'explained_variance': None,
             }
             return 0,0
 
         # 计算优势函数和回报（当前实现正确，无需修改）
-        advantages = self.calculate_advantages()
-        returns = advantages + torch.tensor(self.values, dtype=torch.float32).to(self.device)
+        raw_advantages = self.calculate_advantages()
+        returns = raw_advantages + torch.tensor(self.values, dtype=torch.float32).to(self.device)
+
+        adv_raw_mean = raw_advantages.mean().item()
+        adv_raw_std = raw_advantages.std().item()
+        adv_raw_max = raw_advantages.max().item()
+        adv_raw_min = raw_advantages.min().item()
+        returns_mean = returns.mean().item()
+        returns_std = returns.std().item()
 
         # 转换为张量并移动到设备
         batch_states = self.states  # 列表，每个元素是状态元组
+        batch_x = torch.as_tensor(np.asarray([s[0] for s in batch_states]), dtype=torch.float32, device=self.device)
+        batch_state_vec = torch.as_tensor(np.asarray([s[1] for s in batch_states]), dtype=torch.float32, device=self.device)
+        batch_graph = torch.as_tensor(np.asarray([s[2] for s in batch_states]), dtype=torch.float32, device=self.device)
         # 先汇总为 numpy 数组，再转 tensor，避免 list[np.ndarray] 的慢路径告警
         batch_decisions = torch.as_tensor(np.asarray(self.decisions), dtype=torch.long, device=self.device)
         batch_decision_log_probs = torch.as_tensor(np.asarray(self.decision_log_probs), dtype=torch.float32, device=self.device)
@@ -390,7 +448,20 @@ class HPPO:
         batch_grab_success = torch.as_tensor(np.asarray(self.grab_success_flags), dtype=torch.float32, device=self.device)
 
         # 标准化优势
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        advantages = (raw_advantages - raw_advantages.mean()) / (raw_advantages.std() + 1e-8)
+
+        adv_norm_mean = advantages.mean().item()
+        adv_norm_std = advantages.std().item()
+        adv_norm_max = advantages.max().item()
+        adv_norm_min = advantages.min().item()
+
+        if self.print_advantage_stats:
+            print(
+                f"[ADV raw] mean={adv_raw_mean:.6f}, std={adv_raw_std:.6f}, max={adv_raw_max:.6f}, min={adv_raw_min:.6f}"
+            )
+            print(
+                f"[ADV norm] mean={adv_norm_mean:.6f}, std={adv_norm_std:.6f}, max={adv_norm_max:.6f}, min={adv_norm_min:.6f}"
+            )
 
         loss_continuous = 0
         loss_discrete = 0
@@ -403,52 +474,41 @@ class HPPO:
         loss_total_sum = 0
         grab_mask_mean_sum = 0
         step_mask_mean_sum = 0
+        ratio_decision_mean_sum = 0
+        ratio_decision_std_sum = 0
+        ratio_decision_p05_sum = 0
+        ratio_decision_p95_sum = 0
+        clipfrac_decision_sum = 0
+        approx_kl_decision_sum = 0
+        ratio_grab_mean_sum = 0
+        clipfrac_grab_sum = 0
+        approx_kl_grab_sum = 0
+        ratio_step_mean_sum = 0
+        clipfrac_step_sum = 0
+        approx_kl_step_sum = 0
+        values_mean_sum = 0
+        values_std_sum = 0
+        explained_variance_sum = 0
+
+        def masked_mean(x, mask):
+            denom = torch.clamp(mask.sum(), min=1.0)
+            return ((x * mask).sum() / denom).item()
 
         for _ in range(self.policy_update_epochs):
-            all_decision_dists = []
-            all_grab_dists = []
-            all_step_dists = []
-            all_grab_cont_dists = []
-            all_step_cont_dists = []
-            all_values = []
-
-            # 批量处理状态
-            for i in range(len(batch_states)):
-                decision_logits, grab_logits, step_logits, grab_mu, step_mu, value = self.policy(
-                    x=batch_states[i][0],
-                    state=batch_states[i][1],
-                    x_graph=batch_states[i][2]
-                )
-                decision_dist, grab_dist, step_dist, grab_cont_dist, step_cont_dist = self._build_distributions(
-                    decision_logits, grab_logits, step_logits, grab_mu, step_mu
-                )
-
-                all_decision_dists.append(decision_dist)
-                all_grab_dists.append(grab_dist)
-                all_step_dists.append(step_dist)
-                all_grab_cont_dists.append(grab_cont_dist)
-                all_step_cont_dists.append(step_cont_dist)
-                all_values.append(value.squeeze(0))
-
-            new_decision_log_probs = torch.stack(
-                [all_decision_dists[i].log_prob(batch_decisions[i]) for i in range(len(all_decision_dists))]
+            decision_logits, grab_logits, step_logits, grab_mu, step_mu, all_values = self.policy(
+                x=batch_x,
+                state=batch_state_vec,
+                x_graph=batch_graph
             )
-            new_grab_discrete_log_probs = torch.stack(
-                [all_grab_dists[i].log_prob(batch_grab_discrete_actions[i]).squeeze(0) for i in range(len(all_grab_dists))]
-            )
-            new_step_discrete_log_probs = torch.stack(
-                [all_step_dists[i].log_prob(batch_step_discrete_actions[i]).squeeze(0) for i in range(len(all_step_dists))]
-            )
-            new_grab_cont_log_probs = torch.stack(
-                [all_grab_cont_dists[i].log_prob(batch_grab_continuous_actions[i]).sum(-1).squeeze(0)
-                 for i in range(len(all_grab_cont_dists))]
-            )
-            new_step_cont_log_probs = torch.stack(
-                [all_step_cont_dists[i].log_prob(batch_step_continuous_actions[i]).sum(-1).squeeze(0)
-                 for i in range(len(all_step_cont_dists))]
+            decision_dist, grab_dist, step_dist, grab_cont_dist, step_cont_dist = self._build_distributions(
+                decision_logits, grab_logits, step_logits, grab_mu, step_mu
             )
 
-            all_values = torch.stack(all_values)
+            new_decision_log_probs = decision_dist.log_prob(batch_decisions)
+            new_grab_discrete_log_probs = grab_dist.log_prob(batch_grab_discrete_actions)
+            new_step_discrete_log_probs = step_dist.log_prob(batch_step_discrete_actions)
+            new_grab_cont_log_probs = grab_cont_dist.log_prob(batch_grab_continuous_actions).sum(-1)
+            new_step_cont_log_probs = step_cont_dist.log_prob(batch_step_continuous_actions).sum(-1)
 
             decision_mask = torch.ones_like(advantages)
             grab_mask = (batch_decisions == 0).float()
@@ -456,6 +516,25 @@ class HPPO:
 
             old_grab_discrete_log_probs = batch_grab_discrete_log_probs.sum(-1)
             old_step_discrete_log_probs = batch_step_discrete_log_probs.sum(-1)
+
+            ratio_decision = torch.exp(new_decision_log_probs - batch_decision_log_probs)
+            ratio_grab = torch.exp(new_grab_discrete_log_probs.sum(-1) - old_grab_discrete_log_probs)
+            ratio_step = torch.exp(new_step_discrete_log_probs.sum(-1) - old_step_discrete_log_probs)
+
+            ratio_decision_mean_sum += ratio_decision.mean().item()
+            ratio_decision_std_sum += ratio_decision.std().item()
+            ratio_decision_p05_sum += torch.quantile(ratio_decision, 0.05).item()
+            ratio_decision_p95_sum += torch.quantile(ratio_decision, 0.95).item()
+            clipfrac_decision_sum += (torch.abs(ratio_decision - 1.0) > self.clip_ratio).float().mean().item()
+            approx_kl_decision_sum += (batch_decision_log_probs - new_decision_log_probs).mean().item()
+
+            ratio_grab_mean_sum += masked_mean(ratio_grab, grab_mask)
+            clipfrac_grab_sum += masked_mean((torch.abs(ratio_grab - 1.0) > self.clip_ratio).float(), grab_mask)
+            approx_kl_grab_sum += masked_mean(old_grab_discrete_log_probs - new_grab_discrete_log_probs.sum(-1), grab_mask)
+
+            ratio_step_mean_sum += masked_mean(ratio_step, step_mask)
+            clipfrac_step_sum += masked_mean((torch.abs(ratio_step - 1.0) > self.clip_ratio).float(), step_mask)
+            approx_kl_step_sum += masked_mean(old_step_discrete_log_probs - new_step_discrete_log_probs.sum(-1), step_mask)
 
             def masked_ppo_loss(new_lp, old_lp, adv, mask):
                 ratio = torch.exp(new_lp - old_lp)
@@ -472,6 +551,12 @@ class HPPO:
             step_continuous_loss = masked_ppo_loss(new_step_cont_log_probs, batch_step_continuous_log_probs, advantages, step_mask)
 
             value_loss = ((all_values - returns) ** 2).mean()
+
+            values_mean_sum += all_values.mean().item()
+            values_std_sum += all_values.std().item()
+            var_returns = torch.var(returns)
+            explained_variance = 1.0 - torch.var(returns - all_values) / (var_returns + 1e-8)
+            explained_variance_sum += explained_variance.item()
 
             total_loss = (
                 decision_loss +
@@ -509,6 +594,31 @@ class HPPO:
             'loss_total': loss_total_sum / self.policy_update_epochs,
             'grab_mask_mean': grab_mask_mean_sum / self.policy_update_epochs,
             'step_mask_mean': step_mask_mean_sum / self.policy_update_epochs,
+            'adv_raw_mean': adv_raw_mean,
+            'adv_raw_std': adv_raw_std,
+            'adv_raw_max': adv_raw_max,
+            'adv_raw_min': adv_raw_min,
+            'adv_norm_mean': adv_norm_mean,
+            'adv_norm_std': adv_norm_std,
+            'adv_norm_max': adv_norm_max,
+            'adv_norm_min': adv_norm_min,
+            'ratio_decision_mean': ratio_decision_mean_sum / self.policy_update_epochs,
+            'ratio_decision_std': ratio_decision_std_sum / self.policy_update_epochs,
+            'ratio_decision_p05': ratio_decision_p05_sum / self.policy_update_epochs,
+            'ratio_decision_p95': ratio_decision_p95_sum / self.policy_update_epochs,
+            'clipfrac_decision': clipfrac_decision_sum / self.policy_update_epochs,
+            'approx_kl_decision': approx_kl_decision_sum / self.policy_update_epochs,
+            'ratio_grab_mean': ratio_grab_mean_sum / self.policy_update_epochs,
+            'clipfrac_grab': clipfrac_grab_sum / self.policy_update_epochs,
+            'approx_kl_grab': approx_kl_grab_sum / self.policy_update_epochs,
+            'ratio_step_mean': ratio_step_mean_sum / self.policy_update_epochs,
+            'clipfrac_step': clipfrac_step_sum / self.policy_update_epochs,
+            'approx_kl_step': approx_kl_step_sum / self.policy_update_epochs,
+            'returns_mean': returns_mean,
+            'returns_std': returns_std,
+            'values_mean': values_mean_sum / self.policy_update_epochs,
+            'values_std': values_std_sum / self.policy_update_epochs,
+            'explained_variance': explained_variance_sum / self.policy_update_epochs,
         }
 
         # 清空缓冲区

@@ -132,17 +132,17 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                     # x_graph = torch.tensor(robot_state, dtype=torch.float32).unsqueeze(1).to(device)  # 添加维度
                     # 输入次数、状态，选择动作
 
-                    dict = hppo_agent.choose_action(episode_num=total_episode,
-                                                    obs=obs,
-                                                    x_graph=robot_state)
+                    action_dict = hppo_agent.choose_action(episode_num=total_episode,
+                                                           obs=obs,
+                                                           x_graph=robot_state)
 
-                    d_action = dict['discrete_action']
+                    d_action = action_dict['discrete_action']
 
-                    action_shoulder = dict['continuous_action'][0]
-                    action_arm = dict['continuous_action'][1]
-                    log_prob_shoulder = dict['continuous_log_prob'][0]
-                    log_prob_arm = dict['continuous_log_prob'][1]
-                    value = dict['value']
+                    action_shoulder = action_dict['continuous_action'][0]
+                    action_arm = action_dict['continuous_action'][1]
+                    log_prob_shoulder = action_dict['continuous_log_prob'][0]
+                    log_prob_arm = action_dict['continuous_log_prob'][1]
+                    value = action_dict['value']
 
 
                     d1 = float(d_action[1])
@@ -259,23 +259,23 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                         hppo_agent.store_transition(
                             state=[obs_img, robot_state, robot_state],
                             discrete_action=d_action,
-                            continuous_action=dict['continuous_action'],
+                            continuous_action=action_dict['continuous_action'],
                             reward=reward,
                             next_state=[next_obs_img, next_state, next_state],
                             done=done,
                             value=value,
-                            discrete_log_prob=dict['discrete_log_prob'],
-                            continuous_log_prob=dict['continuous_log_prob'],
-                            decision=dict['decision'],
-                            decision_log_prob=dict['decision_log_prob'],
-                            grab_discrete=dict['grab_discrete'],
-                            grab_discrete_log_prob=dict['grab_discrete_log_prob'],
-                            step_discrete=dict['step_discrete'],
-                            step_discrete_log_prob=dict['step_discrete_log_prob'],
-                            grab_continuous=dict['grab_continuous'],
-                            grab_continuous_log_prob=dict['grab_continuous_log_prob'],
-                            step_continuous=dict['step_continuous'],
-                            step_continuous_log_prob=dict['step_continuous_log_prob'],
+                            discrete_log_prob=action_dict['discrete_log_prob'],
+                            continuous_log_prob=action_dict['continuous_log_prob'],
+                            decision=action_dict['decision'],
+                            decision_log_prob=action_dict['decision_log_prob'],
+                            grab_discrete=action_dict['grab_discrete'],
+                            grab_discrete_log_prob=action_dict['grab_discrete_log_prob'],
+                            step_discrete=action_dict['step_discrete'],
+                            step_discrete_log_prob=action_dict['step_discrete_log_prob'],
+                            grab_continuous=action_dict['grab_continuous'],
+                            grab_continuous_log_prob=action_dict['grab_continuous_log_prob'],
+                            step_continuous=action_dict['step_continuous'],
+                            step_continuous_log_prob=action_dict['step_continuous_log_prob'],
                             grab_success=True
                         )
                     robot_state = env.get_robot_state()  # 获取机器人状态
@@ -352,6 +352,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                     loss_continuous=0,
                     total_episode_num=total_episode,
                     phase_episode_num=tai_episoid,
+                    **dict(getattr(hppo_agent, 'last_learn_stats', {})),
                 )
                 if training_manager is not None:
                     training_manager.increment_shared()
