@@ -57,6 +57,7 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
     gate_activation = {"upper": 0.0, "lower": 0.0, "ankle": 0.0, "all_off": 0, "steps": 0}
     loss_discrete = 0
     loss_continuous = 0
+    loss_stats = {}
 
     # 初始化用于保持姿势的变量
     robot_state_initial = env.get_robot_state()
@@ -239,7 +240,18 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
                 done=done,
                 value=tai_value,
                 discrete_log_prob=tai_dict['discrete_log_prob'],
-                continuous_log_prob=tai_continuous_log_prob_full
+                continuous_log_prob=tai_continuous_log_prob_full,
+                decision=tai_dict['decision'],
+                decision_log_prob=tai_dict['decision_log_prob'],
+                grab_discrete=tai_dict['grab_discrete'],
+                grab_discrete_log_prob=tai_dict['grab_discrete_log_prob'],
+                step_discrete=tai_dict['step_discrete'],
+                step_discrete_log_prob=tai_dict['step_discrete_log_prob'],
+                grab_continuous=tai_dict['grab_continuous'],
+                grab_continuous_log_prob=tai_dict['grab_continuous_log_prob'],
+                step_continuous=tai_dict['step_continuous'],
+                step_continuous_log_prob=tai_dict['step_continuous_log_prob'],
+                grab_success=catch_success
             )
             print(f"  已存储经验: reward={reward:.4f}")
                         
@@ -257,6 +269,7 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
                 training_manager.increment_shared()
                 if training_manager.should_learn_shared():
                     loss_discrete, loss_continuous = hppo_agent.learn()
+                    loss_stats = dict(getattr(hppo_agent, 'last_learn_stats', {}))
                     print("=" * 60)
                     print(f"【单智能体学习-抬腿阶段】{training_manager.get_status()}")
                     print(f"【第 {total_episode} 回合训练完成】")
@@ -276,6 +289,7 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
                     print(f"【单智能体累积经验-抬腿阶段】{training_manager.get_status()}")
             else:
                 loss_discrete, loss_continuous = hppo_agent.learn()
+                loss_stats = dict(getattr(hppo_agent, 'last_learn_stats', {}))
                 print("=" * 60)
                 print(f"【第 {total_episode} 回合训练完成】")
                 print(f"  累积奖励 (return_all): {return_all:.4f}")
@@ -302,6 +316,7 @@ def PPO_tai_episoid(existing_env=None ,total_episode=0, episode=0, log_writer_ta
                 loss_continuous=loss_continuous,
                 total_episode_num=total_episode,
                 phase_episode_num=episode,
+                **loss_stats,
             )
             gate_activation = {"upper": 0.0, "lower": 0.0, "ankle": 0.0, "all_off": 0, "steps": 0}
             

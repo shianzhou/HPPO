@@ -1,133 +1,21 @@
 # 测试
-import torch
 from python_scripts.PPO.PPO_episoid_2_1 import PPO_tai_episoid
-from python_scripts.Webots_interfaces import Environment
+from python_scripts.PPO.checkpoint_utils import (
+    _ensure_dir,
+    _next_log_file,
+    _save_single_checkpoint,
+    load_single_model,
+)
 from python_scripts.PPO.hppo_01 import HPPO as hppo
-# from Data_fusion import data_fusion
-from python_scripts.Project_config import path_list, gps_goal
+from python_scripts.PPO.training_manager import TrainingManager
 from python_scripts.PPO_Log_write import Log_write
-
-
-# ===== 路径与文件工具函数（统一管理） =====
-import os
-import glob
-import re
-
-
-# ===== 方案A: 训练管理器（同步三个模型的更新频率） =====
-class TrainingManager:
-    """
-    单智能体学习节奏管理。
-    核心思想：抓取和抬腿都先积累经验，再按统一间隔学习。
-    """
-    def __init__(self):
-        self.shared_episodes = 0
-        
-        # 统一学习间隔，避免同一智能体在不同阶段过于频繁更新
-        self.shared_learn_interval = 3
-        
-        print("【训练管理器初始化】")
-        print(f"  单智能体学习间隔: {self.shared_learn_interval}个episodes")
-    
-    def should_learn_shared(self) -> bool:
-        """决定是否执行单智能体学习"""
-        result = (self.shared_episodes % self.shared_learn_interval == 0) and (self.shared_episodes > 0)
-        return result
-    
-    def increment_shared(self):
-        """单智能体episode计数加1"""
-        self.shared_episodes += 1
-    
-    def get_status(self) -> str:
-        """获取当前训练状态"""
-        return f"[TrainingManager] Shared:{self.shared_episodes}"
-
-
-def _ensure_dir(path: str) -> None:
-    try:
-        os.makedirs(path, exist_ok=True)
-    except Exception:
-        pass
-
-def _next_log_file(dir_path: str, prefix: str) -> str:
-    pattern = os.path.join(dir_path, f"{prefix}_*.json")
-    existing = glob.glob(pattern)
-    max_n = 0
-    for p in existing:
-        m = re.search(rf"{re.escape(prefix)}_(\d+)\.json$", os.path.basename(p))
-        if m:
-            try:
-                n = int(m.group(1))
-                if n > max_n:
-                    max_n = n
-            except Exception:
-                continue
-    return os.path.join(dir_path, f"{prefix}_{max_n + 1}.json")
-
-def _latest_single_ckpt(dir_path: str):
-    """加载目录中最新的 single_hppo_*.ckpt。"""
-    files = glob.glob(os.path.join(dir_path, "single_hppo_*.ckpt"))
-    if not files:
-        return None, 0
-
-    def _num(f: str) -> int:
-        b = os.path.basename(f)
-        m_new = re.search(r"single_hppo_(\d+)\.ckpt$", b)
-        return int(m_new.group(1)) if m_new else -1
-
-    selected = max(files, key=_num)
-    return selected, _num(selected)
+from python_scripts.Project_config import gps_goal, path_list
+from python_scripts.Webots_interfaces import Environment
 
 
 def _reset_env_for_next_decision(env, wait_ms: int = 500):
     env.reset()
     env.wait(wait_ms)
-
-# ===== 模型加载工具函数（提炼提高可读性） =====
-def load_single_model(model_path: str, hppo_agent, ckpt_dir: str) -> int:
-    """加载单智能体模型，优先指定路径；否则自动加载目录最新。"""
-    episode_start = 0
-    if model_path:
-        try:
-            ckpt = torch.load(model_path)
-            if isinstance(ckpt, dict) and 'policy' in ckpt:
-                hppo_agent.policy.load_state_dict(ckpt['policy'])
-                if 'optimizer_hppo' in ckpt and hppo_agent.optimizer:
-                    hppo_agent.optimizer.load_state_dict(ckpt['optimizer_hppo'])
-                print(f"从指定模型加载: {model_path}，单智能体模型加载成功！")
-                try:
-                    episode_start = int(os.path.basename(model_path).split('_')[-1].split('.')[0])
-                    print(f"从指定模型加载: {model_path}，从周期 {episode_start} 继续训练")
-                except Exception:
-                    pass
-            else:
-                hppo_agent.policy.load_state_dict(ckpt)
-                print(f"从指定模型加载: {model_path}，单智能体模型加载成功！")
-        except Exception as e:
-            print(f"指定模型加载失败: {e}")
-            episode_start = 0
-        return episode_start
-
-    # 未指定路径，查找目录最新
-    selected_model, episode_start = _latest_single_ckpt(ckpt_dir)
-    if selected_model:
-        try:
-            ckpt = torch.load(selected_model)
-            if isinstance(ckpt, dict) and 'policy' in ckpt:
-                hppo_agent.policy.load_state_dict(ckpt['policy'])
-                if 'optimizer_hppo' in ckpt and hppo_agent.optimizer:
-                    hppo_agent.optimizer.load_state_dict(ckpt['optimizer_hppo'])
-                print("单智能体模型加载成功！")
-            else:
-                hppo_agent.policy.load_state_dict(ckpt)
-                print("单智能体模型加载成功！")
-        except Exception as e:
-            print(f"单智能体模型加载失败: {e}")
-            episode_start = 0
-    else:
-        print("未找到已保存的单智能体模型，从头开始训练")
-        episode_start = 0
-    return episode_start
 
 
 def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
@@ -144,7 +32,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
     )
 
     # ===== 日志写入器（单文件） =====
-    log_writer = Log_write()
+    log_writer = Log_write(keep_records=False)
 
     # ===== 基础计数 =====
     tai_episoid = 1
@@ -170,6 +58,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
     # 上层总训练循环（新增）
     # ===============================
     MAX_TOTAL_EPISODE = 3000
+    SAVE_INTERVAL = 100
 
     env = Environment()  # 仍然只有一个 env
     _reset_env_for_next_decision(env, 500)
@@ -231,6 +120,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             prev_distance = None
             catch_loss_discrete = 0
             catch_loss_continuous = 0
+            catch_loss_stats = {}
             while True:
                     # print(f'总周期{total_episode}，第{steps}步')
                     ppo_state = [robot_state[1], robot_state[0], robot_state[5], robot_state[4]]  # 将机器人状态转换为ppo状态
@@ -242,17 +132,17 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                     # x_graph = torch.tensor(robot_state, dtype=torch.float32).unsqueeze(1).to(device)  # 添加维度
                     # 输入次数、状态，选择动作
 
-                    dict = hppo_agent.choose_action(episode_num=total_episode,
-                                                    obs=obs,
-                                                    x_graph=robot_state)
+                    action_dict = hppo_agent.choose_action(episode_num=total_episode,
+                                                           obs=obs,
+                                                           x_graph=robot_state)
 
-                    d_action = dict['discrete_action']
+                    d_action = action_dict['discrete_action']
 
-                    action_shoulder = dict['continuous_action'][0]
-                    action_arm = dict['continuous_action'][1]
-                    log_prob_shoulder = dict['continuous_log_prob'][0]
-                    log_prob_arm = dict['continuous_log_prob'][1]
-                    value = dict['value']
+                    action_shoulder = action_dict['continuous_action'][0]
+                    action_arm = action_dict['continuous_action'][1]
+                    log_prob_shoulder = action_dict['continuous_log_prob'][0]
+                    log_prob_arm = action_dict['continuous_log_prob'][1]
+                    value = action_dict['value']
 
 
                     d1 = float(d_action[1])
@@ -369,28 +259,30 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                         hppo_agent.store_transition(
                             state=[obs_img, robot_state, robot_state],
                             discrete_action=d_action,
-                            continuous_action=dict['continuous_action'],
+                            continuous_action=action_dict['continuous_action'],
                             reward=reward,
                             next_state=[next_obs_img, next_state, next_state],
                             done=done,
                             value=value,
-                            discrete_log_prob=dict['discrete_log_prob'],
-                            continuous_log_prob=dict['continuous_log_prob']
+                            discrete_log_prob=action_dict['discrete_log_prob'],
+                            continuous_log_prob=action_dict['continuous_log_prob'],
+                            decision=action_dict['decision'],
+                            decision_log_prob=action_dict['decision_log_prob'],
+                            grab_discrete=action_dict['grab_discrete'],
+                            grab_discrete_log_prob=action_dict['grab_discrete_log_prob'],
+                            step_discrete=action_dict['step_discrete'],
+                            step_discrete_log_prob=action_dict['step_discrete_log_prob'],
+                            grab_continuous=action_dict['grab_continuous'],
+                            grab_continuous_log_prob=action_dict['grab_continuous_log_prob'],
+                            step_continuous=action_dict['step_continuous'],
+                            step_continuous_log_prob=action_dict['step_continuous_log_prob'],
+                            grab_success=True
                         )
                     robot_state = env.get_robot_state()  # 获取机器人状态
 
                     obs_tensor = next_obs_tensor  # 更新图像张量
                     # if temp < 5000:  # 如果经验回放缓存小于3000
                     if done == 1:  # 只有在当前决策周期结束后才学习
-                        if goal == 1:  # 如果达到目标
-                            print("goal = 1")
-                            save_path = os.path.join(catch_checkpoint_dir, f"single_hppo_{total_episode}.ckpt")
-                            checkpoint = {
-                                'policy': hppo_agent.policy.state_dict(),
-                                'optimizer_hppo': hppo_agent.optimizer.state_dict(),
-                                'episode': total_episode
-                            }
-                            torch.save(checkpoint, save_path)
                         # print("11111111111111111111111111111111111111111-303")
                         # loss_shoulder = ppo_shoulder.learn(action_type='shoulder')
                         # print("22222222222222222222222222222222222222222-305")
@@ -403,6 +295,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                         if training_manager.should_learn_shared():
                             loss_d, loss_c = hppo_agent.learn()
                             catch_loss_discrete, catch_loss_continuous = loss_d, loss_c
+                            catch_loss_stats = dict(getattr(hppo_agent, 'last_learn_stats', {}))
                             loss1, loss2 = loss_d, loss_c
                             print(f'【单智能体学习-抓取阶段】{training_manager.get_status()} | loss_discrete: {loss1:.6f}, loss_continuous: {loss2:.6f}')
                         else:
@@ -410,14 +303,8 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                             print(f'【单智能体累积经验-抓取阶段】{training_manager.get_status()}')
                             loss1, loss2 = 0, 0
 
-                        if total_episode % 100 == 0 and total_episode != 0:  # 每100个总周期保存一次模型
-                            save_path = os.path.join(catch_checkpoint_dir, f"single_hppo_{total_episode}.ckpt")
-                            checkpoint = {
-                                'policy': hppo_agent.policy.state_dict(),
-                                'optimizer_hppo': hppo_agent.optimizer.state_dict(),
-                                'episode': total_episode
-                            }
-                            torch.save(checkpoint, save_path)
+                        if total_episode % SAVE_INTERVAL == 0 and total_episode != 0:  # 每固定总周期保存一次模型
+                            _save_single_checkpoint(hppo_agent, catch_checkpoint_dir, total_episode)
 
                     success_flag1 = env.darwin.get_touch_sensor_value('grasp_L1_2')
 
@@ -446,6 +333,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                 loss_continuous=catch_loss_continuous,
                 total_episode_num=total_episode,
                 phase_episode_num=episode_num,
+                **catch_loss_stats,
             )
             if not need_reset_after_cycle:
                 catch_success = True
@@ -464,6 +352,7 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
                     loss_continuous=0,
                     total_episode_num=total_episode,
                     phase_episode_num=tai_episoid,
+                    **dict(getattr(hppo_agent, 'last_learn_stats', {})),
                 )
                 if training_manager is not None:
                     training_manager.increment_shared()
@@ -495,6 +384,9 @@ def PPO_episoid_1(model_path=None, max_steps_per_episode=5):
             _reset_env_for_next_decision(env, 500)
 
         total_episode += 1
+
+    # 训练结束时额外保存一次最终模型
+    _save_single_checkpoint(hppo_agent, catch_checkpoint_dir, total_episode)
 
     # 如果整个训练过程结束，返回抓取成功状态和环境实例
     return False, env
